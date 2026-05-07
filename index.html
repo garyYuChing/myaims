@@ -1,235 +1,631 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AIMS SaaS 管理系統</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
-        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f0f9ff; }
-        .glass-morphism { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(10px); }
-        .gradient-bg { background: linear-gradient(135deg, #0ea5e9 0%, #2dd4bf 100%); }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SAAS 商品查詢系統</title>
+
+  <style>
+    *{
+      box-sizing:border-box;
+      font-family: "Segoe UI","Microsoft JhengHei",sans-serif;
+    }
+
+    body{
+      margin:0;
+      background:
+        linear-gradient(135deg,#e0f2ff 0%,#f8fbff 50%,#eef4ff 100%);
+      min-height:100vh;
+      overflow-x:hidden;
+      color:#1d3557;
+    }
+
+    .topbar{
+      width:100%;
+      height:72px;
+      background:rgba(255,255,255,.8);
+      backdrop-filter: blur(10px);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:0 24px;
+      position:sticky;
+      top:0;
+      z-index:100;
+      box-shadow:0 2px 10px rgba(0,0,0,.05);
+    }
+
+    .logo{
+      font-size:24px;
+      font-weight:700;
+      color:#1b4965;
+    }
+
+    .gear-btn{
+      width:48px;
+      height:48px;
+      border-radius:50%;
+      border:none;
+      background:#4ea8de;
+      color:white;
+      font-size:24px;
+      cursor:pointer;
+      transition:.2s;
+      box-shadow:0 4px 12px rgba(78,168,222,.4);
+    }
+
+    .gear-btn:hover{
+      transform:rotate(30deg) scale(1.05);
+    }
+
+    .container{
+      width:100%;
+      max-width:1200px;
+      margin:auto;
+      padding:40px 24px 120px;
+    }
+
+    .card{
+      background:white;
+      border-radius:24px;
+      padding:28px;
+      box-shadow:0 10px 30px rgba(0,0,0,.08);
+      margin-bottom:24px;
+    }
+
+    .station-display{
+      text-align:center;
+      font-size:42px;
+      font-weight:700;
+      margin:40px 0;
+      color:#0077b6;
+    }
+
+    .section-title{
+      font-size:24px;
+      font-weight:700;
+      margin-bottom:20px;
+    }
+
+    .search-row{
+      display:flex;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+
+    input{
+      flex:1;
+      min-width:260px;
+      padding:16px;
+      border-radius:14px;
+      border:2px solid #dcefff;
+      font-size:16px;
+      outline:none;
+      transition:.2s;
+    }
+
+    input:focus{
+      border-color:#4ea8de;
+    }
+
+    button{
+      border:none;
+      cursor:pointer;
+      transition:.2s;
+    }
+
+    .primary-btn{
+      background:#00b4d8;
+      color:white;
+      padding:16px 24px;
+      border-radius:14px;
+      font-size:16px;
+      font-weight:700;
+      box-shadow:0 4px 12px rgba(0,180,216,.25);
+    }
+
+    .primary-btn:hover{
+      transform:translateY(-2px);
+    }
+
+    .result-list{
+      margin-top:20px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
+    .result-item{
+      background:#f6fbff;
+      border:2px solid #d8efff;
+      border-radius:16px;
+      padding:18px;
+      cursor:pointer;
+      transition:.2s;
+    }
+
+    .result-item:hover{
+      background:#eaf7ff;
+      transform:translateX(4px);
+    }
+
+    .product-id{
+      font-weight:700;
+      color:#0077b6;
+      font-size:18px;
+    }
+
+    .product-name{
+      margin-top:6px;
+      color:#444;
+    }
+
+    .detail-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+      gap:16px;
+      margin-top:24px;
+    }
+
+    .detail-item{
+      background:#f7fbff;
+      padding:16px;
+      border-radius:16px;
+      border:1px solid #d7ebff;
+    }
+
+    .detail-label{
+      font-size:13px;
+      color:#666;
+      margin-bottom:6px;
+    }
+
+    .detail-value{
+      font-size:18px;
+      font-weight:700;
+      word-break:break-word;
+    }
+
+    .floating-btn{
+      position:fixed;
+      left:50%;
+      transform:translateX(-50%);
+      bottom:24px;
+      z-index:999;
+      background:linear-gradient(135deg,#00b4d8,#0077b6);
+      color:white;
+      padding:18px 36px;
+      border-radius:999px;
+      font-size:18px;
+      font-weight:700;
+      box-shadow:0 8px 24px rgba(0,119,182,.35);
+    }
+
+    .floating-btn:hover{
+      transform:translateX(-50%) scale(1.04);
+    }
+
+    .modal{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,.4);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:2000;
+    }
+
+    .modal-content{
+      width:90%;
+      max-width:420px;
+      background:white;
+      border-radius:24px;
+      padding:28px;
+      position:relative;
+    }
+
+    .close-btn{
+      position:absolute;
+      right:16px;
+      top:12px;
+      background:none;
+      font-size:24px;
+    }
+
+    select{
+      width:100%;
+      padding:16px;
+      border-radius:14px;
+      border:2px solid #dcefff;
+      font-size:16px;
+      margin-top:16px;
+    }
+
+    .loading{
+      margin-top:16px;
+      color:#0077b6;
+      font-weight:700;
+    }
+
+    pre{
+      white-space:pre-wrap;
+      background:#0f172a;
+      color:#d6f1ff;
+      padding:20px;
+      border-radius:16px;
+      overflow:auto;
+      margin-top:20px;
+    }
+  </style>
 </head>
-<body class="min-h-screen pb-24">
 
-    <!-- 導航列 -->
-    <nav class="bg-white shadow-sm p-4 flex justify-between items-center px-8 sticky top-0 z-50">
-        <div class="flex items-center space-x-2">
-            <div class="gradient-bg p-2 rounded-lg text-white">
-                <i data-lucide="layout-grid" class="w-6 h-6"></i>
-            </div>
-            <span class="text-xl font-bold text-gray-800">AIMS SaaS</span>
-        </div>
-        
-        <div class="flex items-center space-x-4">
-            <button onclick="toggleSettings()" class="text-gray-500 hover:rotate-90 transition-transform duration-300">
-                <i data-lucide="settings" class="w-6 h-6"></i>
-            </button>
-            <div class="flex items-center space-x-2 bg-gray-100 px-3 py-1 rounded-full">
-                <i data-lucide="user" class="w-4 h-4 text-gray-600"></i>
-                <span class="text-sm font-medium">管理者</span>
-            </div>
-        </div>
-    </nav>
+<body>
 
-    <!-- 主畫面內容 -->
-    <main class="max-w-4xl mx-auto mt-12 p-6 text-center">
-        <!-- 當前店別顯示 -->
-        <div id="current-station" class="mb-12">
-            <h2 id="station-display" class="text-4xl font-black text-transparent bg-clip-text gradient-bg">
-                請先至設定選擇店別
-            </h2>
-            <p class="text-gray-400 mt-2">Current Active Station</p>
-        </div>
+  <div class="topbar">
+    <div class="logo">🛒 SAAS 商品查詢系統</div>
 
-        <!-- 產品搜尋區塊 -->
-        <div class="bg-white rounded-2xl shadow-xl p-8 transition-all hover:shadow-2xl">
-            <div class="flex flex-col items-center space-y-6">
-                <div class="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center">
-                    <i data-lucide="search" class="w-8 h-8 text-blue-500"></i>
-                </div>
-                <h1 class="text-2xl font-bold text-gray-800">PRODUCT ID 產品查詢</h1>
-                
-                <div class="w-full relative max-w-md">
-                    <input type="text" id="product-input" placeholder="輸入 ID 進行模糊搜尋..." 
-                           class="w-full px-5 py-3 rounded-xl border-2 border-blue-100 focus:border-blue-400 focus:outline-none transition-all pr-12 text-lg">
-                    <button onclick="fetchArticles()" class="absolute right-3 top-3 text-blue-500">
-                        <i data-lucide="refresh-cw" class="w-6 h-6"></i>
-                    </button>
-                </div>
+    <button class="gear-btn" onclick="openSetting()">
+      ⚙
+    </button>
+  </div>
 
-                <!-- 搜尋結果列表 -->
-                <div id="result-list" class="w-full max-w-md mt-4 space-y-2 text-left max-h-60 overflow-y-auto">
-                    <!-- 動態生成結果 -->
-                </div>
-            </div>
-        </div>
-    </main>
+  <div class="container">
 
-    <!-- 齒輪設定抽屜 (隱藏) -->
-    <div id="settings-panel" class="fixed right-0 top-0 h-full w-80 bg-white shadow-2xl translate-x-full transition-transform duration-300 z-[60] p-6 border-l">
-        <div class="flex justify-between items-center mb-8">
-            <h3 class="text-xl font-bold">系統設定</h3>
-            <button onclick="toggleSettings()" class="text-gray-400 hover:text-red-500">
-                <i data-lucide="x" class="w-6 h-6"></i>
-            </button>
-        </div>
-        <div class="space-y-4">
-            <label class="block text-sm font-medium text-gray-700">選擇店別 (Station Code)</label>
-            <select id="station-select" onchange="selectStation()" class="w-full p-3 rounded-lg bg-gray-50 border border-gray-200 focus:ring-2 focus:ring-blue-400 outline-none">
-                <option value="">載入中...</option>
-            </select>
-        </div>
+    <div id="stationDisplay" class="station-display">
+      尚未選擇店別
     </div>
 
-    <!-- 產品明細彈窗 (Modal) -->
-    <div id="detail-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-[70] p-4">
-        <div class="bg-white rounded-3xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-300">
-            <div class="gradient-bg p-6 text-white flex justify-between items-center">
-                <h3 class="text-xl font-bold">產品詳細資訊</h3>
-                <button onclick="closeModal()"><i data-lucide="x-circle"></i></button>
-            </div>
-            <div id="detail-content" class="p-6 grid grid-cols-2 gap-4 text-sm">
-                <!-- 動態注入內容 -->
-            </div>
-            <div class="p-6 border-t bg-gray-50 text-right">
-                <button onclick="closeModal()" class="px-6 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700">關閉</button>
-            </div>
-        </div>
-    </div>
+    <div class="card">
+      <div class="section-title">
+        🔍 PRODUCT ID 查找商品資訊
+      </div>
 
-    <!-- 底部懸浮 Mapping 按鈕 -->
-    <div class="fixed bottom-8 left-1/2 -translate-x-1/2 z-50">
-        <button onclick="fetchMappingInfo()" class="flex items-center space-x-2 px-8 py-4 bg-gray-900 text-white rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all group">
-            <i data-lucide="link" class="w-5 h-5 group-hover:rotate-12 transition-transform"></i>
-            <span class="font-bold tracking-wider">查詢 MappingInfo</span>
+      <div class="search-row">
+        <input
+          type="text"
+          id="productSearch"
+          placeholder="輸入 PRODUCT ID (支援模糊搜尋)"
+        />
+
+        <button class="primary-btn" onclick="searchProduct()">
+          搜尋商品
         </button>
+
+        <button class="primary-btn" onclick="loadArticles()">
+          先載入商品資料
+        </button>
+      </div>
+
+      <div id="loadingText" class="loading"></div>
+
+      <div id="resultList" class="result-list"></div>
     </div>
 
-    <script>
-        const API_KEY = 'NsKQvyOF.zguBCKAfwFCLBgIizGGaClomAJebJVZaRxy';
-        let currentStationCode = '';
-        let allArticles = [];
+    <div id="detailCard" class="card" style="display:none;">
+      <div class="section-title">
+        📦 商品明細
+      </div>
 
-        // 初始化 Lucide 圖標
-        lucide.createIcons();
+      <div id="detailGrid" class="detail-grid"></div>
+    </div>
 
-        // 1. 頁面載入後抓取店別
-        async function fetchStations() {
-            try {
-                const response = await fetch('https://asia.aims.solumesl.com/portal/stations?accessPoints=false', {
-                    headers: { 'accept': 'application/json', 'api-key': API_KEY }
-                });
-                const data = await response.json();
-                const select = document.getElementById('station-select');
-                select.innerHTML = '<option value="">請選擇店別</option>';
-                data.forEach(item => {
-                    const option = document.createElement('option');
-                    option.value = item.code;
-                    option.text = `${item.code} ${item.name}`;
-                    select.appendChild(option);
-                });
-            } catch (err) { alert('載入店別失敗'); }
+    <div id="mappingCard" class="card" style="display:none;">
+      <div class="section-title">
+        🔗 Mapping Info
+      </div>
+
+      <pre id="mappingContent"></pre>
+    </div>
+
+  </div>
+
+  <button class="floating-btn" onclick="getMappingInfo()">
+    查詢 MappingInfo
+  </button>
+
+  <!-- 設定視窗 -->
+  <div id="settingModal" class="modal">
+    <div class="modal-content">
+
+      <button class="close-btn" onclick="closeSetting()">
+        ✕
+      </button>
+
+      <h2>⚙ 店別設定</h2>
+
+      <select id="stationSelect"></select>
+
+    </div>
+  </div>
+
+<script>
+
+  const API_KEY = "NsKQvyOF.zguBCKAfwFCLBgIizGGaClomAJebJVZaRxy";
+
+  let stations = [];
+  let selectedStationCode = "";
+  let selectedStationText = "";
+
+  let articles = [];
+  let selectedProduct = null;
+
+  async function openSetting(){
+    document.getElementById("settingModal").style.display = "flex";
+
+    if(stations.length === 0){
+      await loadStations();
+    }
+  }
+
+  function closeSetting(){
+    document.getElementById("settingModal").style.display = "none";
+  }
+
+  async function loadStations(){
+
+    const url =
+      "https://asia.aims.solumesl.com/portal/stations?accessPoints=false";
+
+    try{
+
+      const res = await fetch(url,{
+        headers:{
+          "accept":"application/json",
+          "api-key":API_KEY
         }
+      });
 
-        function toggleSettings() {
-            document.getElementById('settings-panel').classList.toggle('translate-x-full');
-        }
+      const data = await res.json();
 
-        function selectStation() {
-            const select = document.getElementById('station-select');
-            const display = document.getElementById('station-display');
-            currentStationCode = select.value;
-            display.innerText = select.options[select.selectedIndex].text;
-            toggleSettings();
-            // 切換店別時重新清空產品資料
-            allArticles = [];
-            document.getElementById('result-list').innerHTML = '';
-        }
+      stations = data.content || data || [];
 
-        // 2. 獲取所有產品資料 (功能1)
-        async function fetchArticles() {
-            if (!currentStationCode) return alert('請先選擇店別！');
-            
-            try {
-                const response = await fetch(`https://asia.aims.solumesl.com/portal/articles?page=0&size=50&sort=id%2CASC&stationCode=${currentStationCode}`, {
-                    headers: { 'accept': 'application/json', 'api-key': API_KEY }
-                });
-                allArticles = await response.json();
-                alert(`已同步 ${allArticles.length} 筆產品資料`);
-            } catch (err) { alert('獲取產品資料失敗'); }
-        }
+      const select = document.getElementById("stationSelect");
 
-        // 模糊搜尋監聽
-        document.getElementById('product-input').addEventListener('input', (e) => {
-            const val = e.target.value.toLowerCase();
-            const list = document.getElementById('result-list');
-            list.innerHTML = '';
-            
-            if (val.length < 1) return;
+      select.innerHTML = `
+        <option value="">請選擇店別</option>
+      `;
 
-            const filtered = allArticles.filter(item => item.id.includes(val));
-            filtered.forEach(item => {
-                const div = document.createElement('div');
-                div.className = "p-3 bg-white border border-blue-50 rounded-lg cursor-pointer hover:bg-blue-50 transition-colors shadow-sm";
-                div.innerHTML = `<span class="font-bold text-blue-600">${item.id}</span> - <span class="text-gray-700">${item.name}</span>`;
-                div.onclick = () => showDetail(item);
-                list.appendChild(div);
-            });
+      stations.forEach(station=>{
+
+        const text =
+          `${station.code} ${station.name}`;
+
+        const option = document.createElement("option");
+
+        option.value = station.code;
+        option.textContent = text;
+
+        option.dataset.name = station.name;
+
+        select.appendChild(option);
+      });
+
+      select.onchange = function(){
+
+        const option =
+          this.options[this.selectedIndex];
+
+        selectedStationCode = this.value;
+
+        selectedStationText =
+          `${selectedStationCode} ${option.dataset.name}`;
+
+        document.getElementById("stationDisplay")
+          .innerText = selectedStationText;
+
+        closeSetting();
+      };
+
+    }catch(err){
+
+      console.error(err);
+      alert("店別載入失敗");
+    }
+  }
+
+  async function loadArticles(){
+
+    if(!selectedStationCode){
+      alert("請先選擇店別");
+      return;
+    }
+
+    document.getElementById("loadingText")
+      .innerText = "商品資料載入中...";
+
+    try{
+
+      let allArticles = [];
+      let page = 0;
+      let hasNext = true;
+
+      while(hasNext){
+
+        const url =
+          `https://asia.aims.solumesl.com/portal/articles?page=${page}&size=200&sort=id%2CASC&stationCode=${selectedStationCode}`;
+
+        const res = await fetch(url,{
+          headers:{
+            "accept":"application/json",
+            "api-key":API_KEY
+          }
         });
 
-        // 3. 顯示明細頁面
-        function showDetail(item) {
-            const content = document.getElementById('detail-content');
-            const fields = {
-                "店別": item.stationCode || currentStationCode,
-                "ID": item.id,
-                "名稱": item.name,
-                "關聯碼": item.references || 'N/A',
-                "原始價格": item.originalPrice || 'N/A',
-                "主條碼": item.mainBarcode || 'N/A',
-                "SKU": item.sku || 'N/A',
-                "項目代碼": item.itemCode || 'N/A',
-                "現價": item.price || 'N/A'
-            };
-            
-            content.innerHTML = Object.entries(fields).map(([key, val]) => `
-                <div class="bg-gray-50 p-3 rounded-lg">
-                    <p class="text-xs text-gray-400 uppercase">${key}</p>
-                    <p class="font-bold text-gray-800 break-all">${val}</p>
-                </div>
-            `).join('');
+        const data = await res.json();
 
-            document.getElementById('detail-modal').classList.remove('hidden');
-            document.getElementById('detail-modal').classList.add('flex');
+        const content = data.content || [];
+
+        allArticles.push(...content);
+
+        hasNext = !data.last;
+
+        page++;
+      }
+
+      articles = allArticles;
+
+      document.getElementById("loadingText")
+        .innerText =
+        `商品資料載入完成，共 ${articles.length} 筆`;
+
+    }catch(err){
+
+      console.error(err);
+
+      document.getElementById("loadingText")
+        .innerText = "商品資料載入失敗";
+    }
+  }
+
+  function searchProduct(){
+
+    const keyword =
+      document.getElementById("productSearch")
+      .value
+      .trim();
+
+    if(!keyword){
+      alert("請輸入 PRODUCT ID");
+      return;
+    }
+
+    if(articles.length === 0){
+      alert("請先載入商品資料");
+      return;
+    }
+
+    const result = articles.filter(item=>{
+
+      return String(item.id)
+        .includes(keyword);
+    });
+
+    renderResult(result);
+  }
+
+  function renderResult(list){
+
+    const resultList =
+      document.getElementById("resultList");
+
+    resultList.innerHTML = "";
+
+    if(list.length === 0){
+
+      resultList.innerHTML =
+        `<div>查無資料</div>`;
+
+      return;
+    }
+
+    list.forEach(item=>{
+
+      const div = document.createElement("div");
+
+      div.className = "result-item";
+
+      div.innerHTML = `
+        <div class="product-id">
+          ${item.id}
+        </div>
+
+        <div class="product-name">
+          ${item.name || "-"}
+        </div>
+      `;
+
+      div.onclick = ()=>showDetail(item);
+
+      resultList.appendChild(div);
+    });
+  }
+
+  function showDetail(item){
+
+    selectedProduct = item;
+
+    document.getElementById("detailCard")
+      .style.display = "block";
+
+    const detailGrid =
+      document.getElementById("detailGrid");
+
+    detailGrid.innerHTML = "";
+
+    const fields = [
+      ["stationCode", item.stationCode],
+      ["id", item.id],
+      ["name", item.name],
+      ["references", item.references],
+      ["Original_Price", item.Original_Price],
+      ["main_barcode", item.main_barcode],
+      ["sku", item.sku],
+      ["Item_Code", item.Item_Code],
+      ["Price", item.Price]
+    ];
+
+    fields.forEach(([key,value])=>{
+
+      const div = document.createElement("div");
+
+      div.className = "detail-item";
+
+      div.innerHTML = `
+        <div class="detail-label">${key}</div>
+        <div class="detail-value">${value || "-"}</div>
+      `;
+
+      detailGrid.appendChild(div);
+    });
+
+    window.scrollTo({
+      top:document.body.scrollHeight,
+      behavior:"smooth"
+    });
+  }
+
+  async function getMappingInfo(){
+
+    if(!selectedProduct){
+      alert("請先選擇商品");
+      return;
+    }
+
+    try{
+
+      const url =
+        `https://asia.aims.solumesl.com/portal/articles/mappingInfo?stationCode=${selectedStationCode}&searchKey=ARTICLE_ID&value=${selectedProduct.id}`;
+
+      const res = await fetch(url,{
+        headers:{
+          "accept":"application/json",
+          "api-key":API_KEY
         }
+      });
 
-        function closeModal() {
-            document.getElementById('detail-modal').classList.add('hidden');
-            document.getElementById('detail-modal').classList.remove('flex');
-        }
+      const data = await res.json();
 
-        // 4. 底部 Mapping 按鈕功能
-        async function fetchMappingInfo() {
-            if (!currentStationCode) return alert('請先選擇店別！');
-            // 根據需求使用固定的示例參數或根據選中的產品 ID
-            const testId = allArticles[0]?.id || '1485605900101';
-            
-            try {
-                const response = await fetch(`https://asia.aims.solumesl.com/portal/articles/mappingInfo?stationCode=${currentStationCode}&searchKey=ARTICLE_ID&value=${testId}`, {
-                    headers: { 'accept': 'application/json', 'api-key': API_KEY }
-                });
-                const data = await response.json();
-                console.log(data);
-                alert('Mapping Info 已取得 (詳細請看 Console)：\nEAN: ' + (data[0]?.eans || '無資料'));
-            } catch (err) { alert('Mapping 查詢失敗'); }
-        }
+      document.getElementById("mappingCard")
+        .style.display = "block";
 
-        // 初始化
-        fetchStations();
-    </script>
+      document.getElementById("mappingContent")
+        .innerText =
+        JSON.stringify(data,null,2);
+
+      window.scrollTo({
+        top:document.body.scrollHeight,
+        behavior:"smooth"
+      });
+
+    }catch(err){
+
+      console.error(err);
+
+      alert("mappingInfo 查詢失敗");
+    }
+  }
+
+</script>
+
 </body>
 </html>
