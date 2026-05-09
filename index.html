@@ -287,6 +287,9 @@
     <div class="panel-label">店別</div>
     <select class="styled-select" id="station-select"><option value="">— 請選擇 —</option></select>
     <button class="btn-confirm" onclick="confirmStation()">確認套用</button>
+    <button onclick="clearApiKey()" style="width:100%;margin-top:10px;padding:11px;background:none;border:2px solid #ffccd5;border-radius:10px;color:#ff6b9d;font-family:Nunito,sans-serif;font-size:13px;font-weight:800;cursor:pointer;">
+      🔑 清除 API Key（重新輸入）
+    </button>
   </div>
 </div>
 
@@ -338,9 +341,10 @@
 </div>
 
 <script>
-const API_KEY    = 'NsKQvyOF.zguBCKAfwFCLBgIizGGaClomAJebJVZaRxy';
 const PROXY_BASE = 'https://esl-proxy.aklboy.workers.dev';
+const LS_KEY     = 'esl_portal_apikey'; // localStorage key
 
+let API_KEY        = localStorage.getItem(LS_KEY) || '';
 let stations       = [];
 let currentStation = null;
 let currentProduct = null;
@@ -362,16 +366,70 @@ async function apiGet(path, signal) {
 
 // ── INIT ──
 async function init() {
+  // If no API key stored, show input dialog
+  if (!API_KEY) {
+    showApiKeyDialog();
+    return;
+  }
+  await connectWithKey();
+}
+
+function showApiKeyDialog(errorMsg) {
+  document.getElementById('splash-bar').style.width = '0%';
+  document.getElementById('splash-msg').textContent = '';
+  const el = document.getElementById('splash-error');
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div style="font-size:18px;font-weight:900;color:var(--text);margin-bottom:6px;">🔑 輸入 API Key</div>
+    <div style="font-size:12px;color:var(--text2);font-weight:600;margin-bottom:16px;">輸入後自動儲存，下次免輸入</div>
+    ${errorMsg ? '<div style="color:#ff4d6d;font-size:13px;font-weight:700;margin-bottom:10px;">⚠️ ' + errorMsg + '</div>' : ''}
+    <input id="apikey-input" type="password"
+      placeholder="貼上 API Key..."
+      style="width:100%;padding:12px 14px;border:2px solid var(--border);border-radius:10px;font-family:JetBrains Mono,monospace;font-size:13px;color:var(--text);background:var(--surface2);outline:none;margin-bottom:12px;box-sizing:border-box;"
+      autocomplete="off" spellcheck="false">
+    <button onclick="submitApiKey()" style="width:100%;padding:13px;background:linear-gradient(135deg,#4f6ef7,#6c8bff);color:white;border:none;border-radius:10px;font-family:Nunito,sans-serif;font-size:15px;font-weight:800;cursor:pointer;">
+      連線
+    </button>
+  `;
+  // Allow Enter key
+  setTimeout(() => {
+    const inp = document.getElementById('apikey-input');
+    if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') submitApiKey(); });
+  }, 100);
+}
+
+async function submitApiKey() {
+  const inp = document.getElementById('apikey-input');
+  if (!inp) return;
+  const key = inp.value.trim();
+  if (!key) return;
+  API_KEY = key;
+  await connectWithKey();
+}
+
+async function connectWithKey() {
+  document.getElementById('splash-error').style.display = 'none';
   setSplash(15, '連線中...');
   try {
-    setSplash(35, '取得店別資料...');
+    setSplash(35, '驗證 API Key...');
     const data = await apiGet('/portal/stations?accessPoints=false');
-    stations = (data.content || data || []).map(s => ({ code: s.code, name: s.name }));
+    const list = data.content || data || [];
+    if (!Array.isArray(list) || list.length === 0) throw new Error('API Key 無效或無店別資料');
+    stations = list.map(s => ({ code: s.code, name: s.name }));
+    // Save to localStorage on success
+    localStorage.setItem(LS_KEY, API_KEY);
     setSplash(95, '取得 ' + stations.length + ' 個店別');
     await sleep(250); setSplash(100, '就緒！'); await sleep(300);
     document.getElementById('init-splash').style.display = 'none';
     document.getElementById('app').style.display = 'block';
-  } catch(e) { showSplashError(e.message); }
+  } catch(e) {
+    // Clear saved key if invalid
+    if (e.message.includes('401') || e.message.includes('403') || e.message.includes('無效')) {
+      localStorage.removeItem(LS_KEY);
+      API_KEY = '';
+    }
+    showApiKeyDialog(e.message);
+  }
 }
 function setSplash(p, m) {
   document.getElementById('splash-bar').style.width = p + '%';
@@ -521,17 +579,17 @@ function renderResults(results, idVal, nameVal) {
 
   let html = '<div class="product-list">';
   results.forEach((p, i) => {
-    const enc = btoa(unescape(encodeURIComponent(JSON.stringify(p))));
-    const dateStr   = formatDate(p.lastUpdated || p.generateDate || '');
-    const dp        = dateStr !== '-' ? dateStr.split(' ') : ['-', ''];
-    html += '<div class="product-item" onclick="openDetail(\'' + enc + '')">'
-      + '<div class="product-num">' + (i + 1) + '</div>'
-      + '<div class="product-info">'
-      + '<div class="product-id">' + hl(p.articleId || '-', hlId) + '</div>'
-      + '<div class="product-name">' + hl(p.articleName || '-', hlName) + '</div>'
-      + '</div>'
-      + '<div class="product-date">' + dp[0] + '<br>' + (dp[1] || '') + '</div>'
-      + '<div class="product-arrow">›</div></div>';
+    const enc     = btoa(unescape(encodeURIComponent(JSON.stringify(p))));
+    const dateStr = formatDate(p.lastUpdated || p.generateDate || '');
+    const dp      = dateStr !== '-' ? dateStr.split(' ') : ['-', ''];
+    html += `<div class="product-item" onclick="openDetail('${enc}')">` +
+      `<div class="product-num">${i + 1}</div>` +
+      `<div class="product-info">` +
+      `<div class="product-id">${hl(p.articleId || '-', hlId)}</div>` +
+      `<div class="product-name">${hl(p.articleName || '-', hlName)}</div>` +
+      `</div>` +
+      `<div class="product-date">${dp[0]}<br>${dp[1] || ''}</div>` +
+      `<div class="product-arrow">›</div></div>`;
   });
   html += '</div>';
   out.innerHTML = html;
@@ -574,32 +632,71 @@ function formatDate(isoStr) {
 // ── DETAIL ──
 function openDetail(enc) {
   const item = JSON.parse(decodeURIComponent(escape(atob(enc))));
-  // 直接用搜尋結果資料，不再背景覆蓋
+  const artId = item.articleId || item.id;
+
+  // Show basic info immediately
   currentProduct = {
-    id:           item.articleId    || item.id,
-    name:         item.articleName  || item.name,
+    id:           artId,
+    name:         item.articleName || item.name,
     stationCode:  currentStation.code,
     _lastUpdated: item.lastUpdated  || item.generateDate || null,
   };
   renderDetail(currentProduct);
-  document.getElementById('mapping-btn').disabled = false;
-  document.getElementById('mapping-btn').innerHTML = '<span>🗺️</span> 查詢 Mapping Info';
+  document.getElementById('mapping-btn').disabled = true;
+  document.getElementById('mapping-btn').innerHTML = '<span>⏳</span> 載入明細...';
   document.getElementById('mapping-result').innerHTML = '';
   document.getElementById('detail-modal').classList.add('active');
+
+  // Fetch full detail from portal API in background
+  fetchPortalDetail(artId);
+}
+
+async function fetchPortalDetail(artId) {
+  try {
+    // Single article endpoint: /portal/articles/{id}?stationCode=xxx
+    const detail = await apiGet(
+      '/portal/articles/' + encodeURIComponent(artId) + '?stationCode=' + currentStation.code
+    );
+    if (detail && detail.id) {
+      // All rich fields are nested inside detail.data
+      const d = detail.data || {};
+      currentProduct = {
+        stationCode:    detail.stationCode || currentStation.code,
+        id:             detail.id,
+        name:           detail.name,
+        references:     d.references     || '',
+        Original_Price: d.Original_Price || '',
+        Price:          d.Price          || '',
+        main_barcode:   d.main_barcode   || '',
+        sku:            d.sku            || '',
+        Item_Code:      d.Item_Code      || '',
+        _lastUpdated:   detail.modifiedDate || detail.createdDate || currentProduct._lastUpdated || '',
+      };
+      renderDetail(currentProduct);
+    }
+  } catch(e) {
+    console.warn('fetchPortalDetail failed:', e.message);
+  } finally {
+    const btn = document.getElementById('mapping-btn');
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<span>🗺️</span> 查詢 Mapping Info';
+    }
+  }
 }
 
 function renderDetail(p) {
   const fields = [
-    { key: 'stationCode',    label: '店別代碼' },
-    { key: 'id',             label: 'Product ID', mono: true },
-    { key: 'name',           label: '商品名稱' },
-    { key: 'references',     label: '條碼參考', chips: true },
-    { key: 'Original_Price', label: '原價', price: 'pink' },
-    { key: 'Price',          label: '售價', price: 'green' },
-    { key: 'main_barcode',   label: '主條碼', mono: true },
-    { key: 'sku',            label: 'SKU', mono: true },
-    { key: 'Item_Code',      label: 'Item Code', mono: true },
-    { key: '_lastUpdated',   label: '更新時間', date: true },
+    { key: 'stationCode',    label: 'stationCode' },
+    { key: 'id',             label: 'id', mono: true },
+    { key: 'name',           label: 'name' },
+    { key: 'references',     label: 'references', chips: true },
+    { key: 'Original_Price', label: 'Original_Price', price: 'pink' },
+    { key: 'Price',          label: 'Price', price: 'green' },
+    { key: 'main_barcode',   label: 'main_barcode', mono: true },
+    { key: 'sku',            label: 'sku', mono: true },
+    { key: 'Item_Code',      label: 'Item_Code', mono: true },
+    { key: '_lastUpdated',   label: 'modifiedDate', date: true },
   ];
   let html = '';
   fields.forEach(f => {
@@ -661,6 +758,17 @@ function showToast(msg) {
 }
 
 function setMode() {} // 舊 filter chip 相容
+
+function clearApiKey() {
+  localStorage.removeItem(LS_KEY);
+  API_KEY = '';
+  document.getElementById('settings-overlay').classList.remove('active');
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('init-splash').style.display = 'flex';
+  document.getElementById('splash-error').style.display = 'none';
+  stations = []; currentStation = null;
+  showApiKeyDialog();
+}
 
 window.addEventListener('DOMContentLoaded', init);
 </script>
