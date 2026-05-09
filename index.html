@@ -549,41 +549,19 @@ function hl(text, q) {
 }
 
 // ── DETAIL ──
-// 選到商品後，用 portal articles API 取完整欄位（價格、條碼等）
 function openDetail(enc) {
   const item = JSON.parse(decodeURIComponent(escape(atob(enc))));
-  // 先用 dashboardservice 拿到的欄位顯示
+  // 直接用搜尋結果資料，不再背景覆蓋
   currentProduct = {
-    id:   item.articleId,
-    name: item.articleName,
+    id:          item.articleId   || item.id,
+    name:        item.articleName || item.name,
     stationCode: currentStation.code,
   };
   renderDetail(currentProduct);
   document.getElementById('mapping-btn').disabled = false;
   document.getElementById('mapping-btn').innerHTML = '<span>🗺️</span> 查詢 Mapping Info';
+  document.getElementById('mapping-result').innerHTML = '';
   document.getElementById('detail-modal').classList.add('active');
-  // 背景取完整明細補充欄位
-  enrichDetail(item.articleId);
-}
-
-async function enrichDetail(articleId) {
-  try {
-    // portal API 以 stationCode 拿全部，再找對應 id
-    // 因為沒有 single-item endpoint，用 searchKey 參數試試
-    const data = await apiGet(
-      '/portal/articles?page=0&size=50&sort=id,ASC&stationCode=' + currentStation.code
-        + '&searchKey=ARTICLE_ID&value=' + encodeURIComponent(articleId)
-    );
-    const list   = data.content || (Array.isArray(data) ? data : []);
-    const detail = list.find(p => p.id === articleId) || list[0];
-    if (detail) {
-      currentProduct = Object.assign({}, detail, { stationCode: detail.stationCode || currentStation.code });
-      renderDetail(currentProduct);
-    }
-  } catch(e) {
-    // 靜默失敗，保留已顯示的基本資料
-    console.warn('enrichDetail failed:', e.message);
-  }
 }
 
 function renderDetail(p) {
