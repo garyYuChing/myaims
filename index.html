@@ -167,9 +167,10 @@
   .product-item:hover, .product-item:active { border-color:var(--accent); background:#f0f4ff; }
   .product-num { width:30px; height:30px; border-radius:9px; background:linear-gradient(135deg,#eef2ff,#dde4ff); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:800; color:var(--accent); flex-shrink:0; }
   .product-info { flex:1; min-width:0; }
-  .product-id { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text2); font-weight:700; }
+  .product-id { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text2); font-weight:600; opacity:0.75; }
   .product-name { font-size:clamp(13px,3.5vw,15px); font-weight:800; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .product-name mark { background:rgba(79,110,247,0.15); color:var(--accent); border-radius:3px; padding:0 2px; font-style:normal; }
+  .product-date { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--text2); font-weight:600; flex-shrink:0; text-align:right; line-height:1.5; white-space:nowrap; opacity:0.8; }
   .product-arrow { color:var(--accent); font-size:18px; flex-shrink:0; }
   .no-result { text-align:center; padding:40px 20px; }
   .no-result .emoji { font-size:44px; margin-bottom:10px; }
@@ -521,12 +522,16 @@ function renderResults(results, idVal, nameVal) {
   let html = '<div class="product-list">';
   results.forEach((p, i) => {
     const enc = btoa(unescape(encodeURIComponent(JSON.stringify(p))));
-    html += '<div class="product-item" onclick="openDetail(\'' + enc + '\')">'
+    const dateStr   = formatDate(p.lastUpdated || p.generateDate || '');
+    const dp        = dateStr !== '-' ? dateStr.split(' ') : ['-', ''];
+    html += '<div class="product-item" onclick="openDetail(\'' + enc + '')">'
       + '<div class="product-num">' + (i + 1) + '</div>'
       + '<div class="product-info">'
       + '<div class="product-id">' + hl(p.articleId || '-', hlId) + '</div>'
       + '<div class="product-name">' + hl(p.articleName || '-', hlName) + '</div>'
-      + '</div><div class="product-arrow">›</div></div>';
+      + '</div>'
+      + '<div class="product-date">' + dp[0] + '<br>' + (dp[1] || '') + '</div>'
+      + '<div class="product-arrow">›</div></div>';
   });
   html += '</div>';
   out.innerHTML = html;
@@ -548,14 +553,33 @@ function hl(text, q) {
   return text.slice(0, idx) + '<mark>' + text.slice(idx, idx + q.length) + '</mark>' + text.slice(idx + q.length);
 }
 
+// Format ISO date string to Taiwan time (UTC+8), YYYY-MM-DD HH:mm:ss
+function formatDate(isoStr) {
+  if (!isoStr) return '-';
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return '-';
+    // Add 8 hours offset to UTC to get Taiwan time
+    const tw = new Date(d.getTime() + 8 * 60 * 60 * 1000);
+    const pad = n => String(n).padStart(2, '0');
+    return tw.getUTCFullYear() + '-'
+      + pad(tw.getUTCMonth() + 1) + '-'
+      + pad(tw.getUTCDate()) + ' '
+      + pad(tw.getUTCHours()) + ':'
+      + pad(tw.getUTCMinutes()) + ':'
+      + pad(tw.getUTCSeconds());
+  } catch(e) { return '-'; }
+}
+
 // ── DETAIL ──
 function openDetail(enc) {
   const item = JSON.parse(decodeURIComponent(escape(atob(enc))));
   // 直接用搜尋結果資料，不再背景覆蓋
   currentProduct = {
-    id:          item.articleId   || item.id,
-    name:        item.articleName || item.name,
-    stationCode: currentStation.code,
+    id:           item.articleId    || item.id,
+    name:         item.articleName  || item.name,
+    stationCode:  currentStation.code,
+    _lastUpdated: item.lastUpdated  || item.generateDate || null,
   };
   renderDetail(currentProduct);
   document.getElementById('mapping-btn').disabled = false;
@@ -571,10 +595,11 @@ function renderDetail(p) {
     { key: 'name',           label: '商品名稱' },
     { key: 'references',     label: '條碼參考', chips: true },
     { key: 'Original_Price', label: '原價', price: 'pink' },
+    { key: 'Price',          label: '售價', price: 'green' },
     { key: 'main_barcode',   label: '主條碼', mono: true },
     { key: 'sku',            label: 'SKU', mono: true },
     { key: 'Item_Code',      label: 'Item Code', mono: true },
-    { key: 'Price',          label: '售價', price: 'green' },
+    { key: '_lastUpdated',   label: '更新時間', date: true },
   ];
   let html = '';
   fields.forEach(f => {
@@ -584,6 +609,7 @@ function renderDetail(p) {
     if (f.chips)                  v = String(val).split(',').map(x => '<span class="chip blue">' + x.trim() + '</span>').join('');
     else if (f.price === 'green') v = '<span class="chip green">💰 NT$ ' + val + '</span>';
     else if (f.price === 'pink')  v = '<span class="chip pink">🏷 NT$ ' + val + '</span>';
+    else if (f.date)              v = '<span class="mono" style="font-size:13px">' + formatDate(val) + '</span>';
     else                          v = '<span class="' + (f.mono ? 'mono' : '') + '">' + val + '</span>';
     html += '<div class="detail-row"><div class="detail-key">' + f.label + '</div><div class="detail-val">' + v + '</div></div>';
   });
@@ -591,7 +617,14 @@ function renderDetail(p) {
   document.getElementById('detail-body').innerHTML = html;
 }
 
-function closeDetailModal() { document.getElementById('detail-modal').classList.remove('active'); }
+function closeDetailModal() {
+  document.getElementById('detail-modal').classList.remove('active');
+  // Reset mapping button (in case it was replaced with done badge)
+  const wrap = document.querySelector('.float-btn-wrap');
+  if (wrap) {
+    wrap.innerHTML = '<button class="float-btn" id="mapping-btn" onclick="queryMappingInfo()"><span>🗺️</span> 查詢 Mapping Info</button>';
+  }
+}
 
 // ── MAPPING ──
 async function queryMappingInfo() {
@@ -609,10 +642,12 @@ async function queryMappingInfo() {
     if (eans.length) html += '<div class="ean-grid">' + eans.map(e => '<div class="ean-item">' + e + '</div>').join('') + '</div>';
     html += '<div class="mapping-raw">' + JSON.stringify(data, null, 2) + '</div></div>';
     document.getElementById('mapping-result').innerHTML = html;
-    btn.innerHTML = '<span>✅</span> 查詢完成';
+    // Replace button with a non-interactive done badge to prevent accidental modal close
+    btn.outerHTML = '<div id="mapping-done-badge" style="width:100%;padding:14px;background:linear-gradient(135deg,#00c9a7,#00a87a);color:white;border-radius:var(--radius-sm);font-family:Nunito,sans-serif;font-size:16px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:8px;opacity:0.85;cursor:default;">✅ 查詢完成</div>';
   } catch(e) {
-    btn.disabled = false;
-    btn.innerHTML = '<span>🗺️</span> 查詢 Mapping Info';
+    // btn may have been replaced; re-query safely
+    const b = document.getElementById('mapping-btn');
+    if (b) { b.disabled = false; b.innerHTML = '<span>🗺️</span> 查詢 Mapping Info'; }
     showToast('查詢失敗：' + e.message);
   }
 }
