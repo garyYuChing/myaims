@@ -301,17 +301,17 @@
     <div class="modal-body">
       <div id="product-load-status"></div>
       <div class="search-bar">
-        <input class="search-input" id="product-search-input"
-          placeholder="Product ID 或商品名稱..."
+        <input class="search-input" id="search-id"
+          placeholder="🔢 Product ID（精確或部分）"
           oninput="onSearchInput()"
           autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-        <button class="btn-search" onclick="doSearch()">搜尋</button>
       </div>
-      <!-- 排序說明 -->
-      <div class="filter-row" id="filter-row" style="display:none">
-        <div class="filter-chip active" id="chip-contains" onclick="setMode('contains')">🔤 包含關鍵字</div>
-        <div class="filter-chip" id="chip-start" onclick="setMode('start')">⬆️ 開頭符合</div>
-        <div class="filter-chip" id="chip-fuzzy" onclick="setMode('fuzzy')">✨ 模糊比對</div>
+      <div class="search-bar" style="margin-top:-4px;margin-bottom:14px">
+        <input class="search-input" id="search-name"
+          placeholder="🔤 商品名稱（中文可）"
+          oninput="onSearchInput()"
+          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <button class="btn-search" onclick="triggerSearch()">搜尋</button>
       </div>
       <div id="product-results"></div>
     </div>
@@ -337,25 +337,26 @@
 </div>
 
 <script>
-// ══════════════════════════════════════════
-//  CONFIG
-// ══════════════════════════════════════════
 const API_KEY    = 'NsKQvyOF.zguBCKAfwFCLBgIizGGaClomAJebJVZaRxy';
-const PROXY_BASE = 'https://esl-proxy.aklboy.workers.dev/'; // ← 換成你的 Cloudflare Worker URL
-// ══════════════════════════════════════════
+const PROXY_BASE = 'https://esl-proxy.aklboy.workers.dev';
 
 let stations       = [];
 let currentStation = null;
 let currentProduct = null;
 let searchTimer    = null;
-let searchMode     = 'contains'; // 保留供 setMode 使用（client-side 二次篩選）
+let searchAbort    = null;
 
-// ── API ──
-async function apiGet(path) {
+// ── Safe fetch ──
+async function apiGet(path, signal) {
   const url = PROXY_BASE.replace(/\/$/, '') + path;
-  const res = await fetch(url, { headers: { 'accept':'application/json', 'api-key': API_KEY } });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  const res = await fetch(url, {
+    headers: { 'accept': 'application/json;charset=UTF-8', 'api-key': API_KEY },
+    signal,
+  });
+  const text = await res.text();
+  if (!text || !text.trim()) return {};
+  try { return JSON.parse(text); }
+  catch(e) { throw new Error('回應格式錯誤'); }
 }
 
 // ── INIT ──
@@ -365,10 +366,8 @@ async function init() {
     setSplash(35, '取得店別資料...');
     const data = await apiGet('/portal/stations?accessPoints=false');
     stations = (data.content || data || []).map(s => ({ code: s.code, name: s.name }));
-    setSplash(95, `取得 ${stations.length} 個店別`);
-    await sleep(250);
-    setSplash(100, '就緒！');
-    await sleep(300);
+    setSplash(95, '取得 ' + stations.length + ' 個店別');
+    await sleep(250); setSplash(100, '就緒！'); await sleep(300);
     document.getElementById('init-splash').style.display = 'none';
     document.getElementById('app').style.display = 'block';
   } catch(e) { showSplashError(e.message); }
@@ -381,9 +380,8 @@ function showSplashError(msg) {
   document.getElementById('splash-msg').textContent = '';
   const el = document.getElementById('splash-error');
   el.style.display = 'block';
-  el.innerHTML = `⚠️ 連線失敗<br><small style="opacity:.8">${msg}</small><br><br>
-    <small>請確認 PROXY_BASE 已填入正確的 Cloudflare Worker URL</small><br><br>
-    <button onclick="location.reload()" style="margin-top:8px;padding:10px 24px;background:#4f6ef7;color:white;border:none;border-radius:10px;font-weight:800;cursor:pointer;font-family:Nunito,sans-serif;font-size:14px;">重新整理</button>`;
+  el.innerHTML = '⚠️ 連線失敗<br><small>' + msg + '</small><br><br>'
+    + '<button onclick="location.reload()" style="margin-top:8px;padding:10px 24px;background:#4f6ef7;color:white;border:none;border-radius:10px;font-weight:800;cursor:pointer;">重新整理</button>';
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -393,8 +391,8 @@ function openSettings() {
   sel.innerHTML = '<option value="">— 請選擇店別 —</option>';
   stations.forEach(s => {
     const o = document.createElement('option');
-    o.value = s.code; o.textContent = `${s.code} ${s.name}`;
-    if (currentStation?.code === s.code) o.selected = true;
+    o.value = s.code; o.textContent = s.code + ' ' + s.name;
+    if (currentStation && currentStation.code === s.code) o.selected = true;
     sel.appendChild(o);
   });
   document.getElementById('settings-overlay').classList.add('active');
@@ -408,256 +406,236 @@ function confirmStation() {
   if (!code) return showToast('請選擇店別');
   const st = stations.find(s => s.code === code);
   if (!st) return;
-  // 切換店別時取消進行中的搜尋
-  if (currentStation?.code !== code && searchAbortController) {
-    searchAbortController.abort(); searchAbortController = null;
-  }
   currentStation = st;
-  document.getElementById('station-badge').textContent = `${st.code} ${st.name}`;
+  document.getElementById('station-badge').textContent = st.code + ' ' + st.name;
   document.getElementById('station-badge').className = 'station-badge';
-  document.getElementById('hero-station-text').textContent = `${st.code} ${st.name}`;
+  document.getElementById('hero-station-text').textContent = st.code + ' ' + st.name;
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('station-state').style.display = '';
   document.getElementById('settings-overlay').classList.remove('active');
 }
 
-// ── PRODUCT SEARCH（邊搜邊查模式）──
-// 不預載全部資料，輸入關鍵字後直接打 API，完全不佔記憶體
-let searchAbortController = null; // 用來取消上一次的搜尋請求
-
-async function openProductSearch() {
+// ══════════════════════════════════════════
+//  商品搜尋
+//  使用 dashboardservice/common/articles
+//  ID 框 → ?id=xxx   Name 框 → ?name=xxx
+//  兩框都填時取交集；只填一個就只用那個
+//  size=500 應足夠涵蓋大部分搜尋結果
+// ══════════════════════════════════════════
+function openProductSearch() {
   if (!currentStation) return showToast('請先選擇店別');
   document.getElementById('product-modal').classList.add('active');
-  document.getElementById('product-search-input').value = '';
+  document.getElementById('search-id').value   = '';
+  document.getElementById('search-name').value = '';
   document.getElementById('product-results').innerHTML = '';
-  document.getElementById('filter-row').style.display = 'none';
-  setSearchHint();
-  // 開啟後自動 focus 搜尋框
-  setTimeout(() => document.getElementById('product-search-input').focus(), 300);
+  setStatus('hint', '請輸入 ID 或名稱開始搜尋');
+  setTimeout(() => document.getElementById('search-id').focus(), 300);
 }
 function closeProductModal() {
   document.getElementById('product-modal').classList.remove('active');
-  if (searchAbortController) { searchAbortController.abort(); searchAbortController = null; }
+  if (searchAbort) { searchAbort.abort(); searchAbort = null; }
 }
 
-function setSearchHint() {
-  document.getElementById('product-load-status').innerHTML =
-    `<div class="status-bar"><span class="status-tag done"><span class="dot"></span>請輸入 ID 或名稱開始搜尋（支援中文模糊）</span></div>`;
-}
-
-// debounce：輸入停頓 350ms 才觸發，避免每打一字都送 API
+// debounce — 停打 500ms 後才送
 function onSearchInput() {
   clearTimeout(searchTimer);
-  const raw = document.getElementById('product-search-input').value.trim();
-  if (!raw) {
+  const id   = document.getElementById('search-id').value.trim();
+  const name = document.getElementById('search-name').value.trim();
+  if (!id && !name) {
     document.getElementById('product-results').innerHTML = '';
-    document.getElementById('filter-row').style.display = 'none';
-    setSearchHint();
+    setStatus('hint', '請輸入 ID 或名稱開始搜尋');
     return;
   }
-  // 顯示 typing 狀態
-  document.getElementById('product-load-status').innerHTML =
-    `<div class="status-bar"><span class="status-tag loading"><span class="dot pulse"></span>輸入中...</span></div>`;
-  searchTimer = setTimeout(() => doSearch(raw), 350);
+  setStatus('loading', '搜尋中...');
+  searchTimer = setTimeout(triggerSearch, 500);
 }
 
-// 搜尋模式切換（只影響 client-side 二次篩選）
-function setMode(mode) {
-  searchMode = mode;
-  ['contains','fuzzy','start'].forEach(m =>
-    document.getElementById('chip-' + m).classList.toggle('active', m === mode)
-  );
-  const raw = document.getElementById('product-search-input').value.trim();
-  if (raw) doSearch(raw);
+function triggerSearch() {
+  clearTimeout(searchTimer);
+  const id   = document.getElementById('search-id').value.trim();
+  const name = document.getElementById('search-name').value.trim();
+  if (!id && !name) return;
+  doSearch(id, name);
 }
 
-// ── 主要搜尋邏輯 ──
-async function doSearch(raw) {
-  if (!raw) return;
-  const out = document.getElementById('product-results');
-
-  // 取消上一次尚未完成的請求
-  if (searchAbortController) searchAbortController.abort();
-  searchAbortController = new AbortController();
-  const signal = searchAbortController.signal;
-
-  document.getElementById('product-load-status').innerHTML =
-    `<div class="status-bar"><span class="status-tag loading"><span class="dot pulse"></span>搜尋中...</span></div>`;
-  document.getElementById('filter-row').style.display = 'none';
-  out.innerHTML = '';
+async function doSearch(idVal, nameVal) {
+  if (searchAbort) searchAbort.abort();
+  searchAbort = new AbortController();
+  const sig   = searchAbort.signal;
+  const store = currentStation.code;
+  setStatus('loading', '搜尋中...');
 
   try {
-    // 同時送出兩個請求：以 ID 搜尋 + 以名稱搜尋
-    // API 支援 searchKey 參數（ARTICLE_ID / ARTICLE_NAME）
-    const [byId, byName] = await Promise.all([
-      apiGetWithSignal(`/portal/articles?page=0&size=50&sort=id,ASC&stationCode=${currentStation.code}&searchKey=ARTICLE_ID&searchValue=${encodeURIComponent(raw)}`, signal),
-      apiGetWithSignal(`/portal/articles?page=0&size=50&sort=id,ASC&stationCode=${currentStation.code}&searchKey=ARTICLE_NAME&searchValue=${encodeURIComponent(raw)}`, signal),
-    ]);
+    let results = [];
 
-    if (signal.aborted) return; // 已被新的搜尋取消
-
-    // 合併去重（以 id 為 key）
-    const idMap = new Map();
-    const merge = (d) => {
-      const items = d?.content || d?.items || (Array.isArray(d) ? d : []);
-      items.forEach(p => { if (p.id) idMap.set(p.id, p); });
-    };
-    merge(byId); merge(byName);
-    let results = Array.from(idMap.values());
-
-    // API 若不支援 searchKey，會回傳全部資料，此時 client-side 再篩一次
-    if (results.length > 40) {
-      results = clientFilter(results, raw);
+    if (idVal && nameVal) {
+      // 兩框都有 → 分別搜尋取交集（name API 搜到的再用 id 過濾）
+      const [byId, byName] = await Promise.all([
+        fetchArticles(store, idVal, '', sig),
+        fetchArticles(store, '', nameVal, sig),
+      ]);
+      if (sig.aborted) return;
+      // 交集：articleId 出現在兩邊
+      const idSet = new Set(byId.map(p => p.articleId));
+      results = byName.filter(p => idSet.has(p.articleId));
+    } else {
+      results = await fetchArticles(store, idVal, nameVal, sig);
+      if (sig.aborted) return;
     }
 
-    // 二次排序：完全符合的排最前
-    results = rankResults(results, raw);
-
-    renderSearchResults(results, raw);
-
+    renderResults(results, idVal, nameVal);
   } catch(e) {
-    if (e.name === 'AbortError') return; // 正常取消，不處理
-    // API 不支援 searchKey → fallback：提示使用者
-    console.warn('Server search failed, check API support:', e.message);
-    document.getElementById('product-load-status').innerHTML =
-      `<div class="status-bar"><span class="status-tag error">⚠️ 搜尋失敗：${e.message}</span></div>`;
+    if (e.name === 'AbortError') return;
+    setStatus('error', '搜尋失敗：' + e.message);
   }
 }
 
-// 支援 AbortController 的 apiGet
-async function apiGetWithSignal(path, signal) {
-  const url = PROXY_BASE.replace(/\/$/, '') + path;
-  const res = await fetch(url, {
-    headers: { 'accept':'application/json', 'api-key': API_KEY },
-    signal,
+// 單次查詢 — 每次最多取 500 筆，通常夠用
+// 若結果剛好 500 筆（代表可能被截斷）則提示縮小範圍
+async function fetchArticles(store, idVal, nameVal, signal) {
+  let path = '/dashboardservice/common/articles?store=' + encodeURIComponent(store)
+    + '&page=0&size=500&sort=name,ASC';
+  if (idVal)   path += '&id='   + encodeURIComponent(idVal);
+  if (nameVal) path += '&name=' + encodeURIComponent(nameVal);
+  const data = await apiGet(path, signal);
+  // API 回傳格式：{ totalArticleCnt, articleList:[{articleId, articleName,...}] }
+  return data.articleList || data.content || (Array.isArray(data) ? data : []);
+}
+
+function renderResults(results, idVal, nameVal) {
+  const out = document.getElementById('product-results');
+
+  if (!results.length) {
+    setStatus('error', '找不到符合的商品');
+    out.innerHTML = '<div class="no-result"><div class="emoji">🤔</div>'
+      + '<p>找不到符合的商品</p><small>試試縮短關鍵字</small></div>';
+    return;
+  }
+
+  const truncated = results.length >= 500;
+  setStatus('done', '找到 ' + results.length + ' 筆' + (truncated ? '（已達上限，請縮小範圍）' : ''));
+
+  const hlId   = idVal   ? idVal   : '';
+  const hlName = nameVal ? nameVal : '';
+
+  let html = '<div class="product-list">';
+  results.forEach((p, i) => {
+    const enc = btoa(unescape(encodeURIComponent(JSON.stringify(p))));
+    html += '<div class="product-item" onclick="openDetail(\'' + enc + '\')">'
+      + '<div class="product-num">' + (i + 1) + '</div>'
+      + '<div class="product-info">'
+      + '<div class="product-id">' + hl(p.articleId || '-', hlId) + '</div>'
+      + '<div class="product-name">' + hl(p.articleName || '-', hlName) + '</div>'
+      + '</div><div class="product-arrow">›</div></div>';
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  html += '</div>';
+  out.innerHTML = html;
 }
 
-// Client-side 篩選（API 不支援 searchKey 時的備援）
-function clientFilter(items, raw) {
-  const q = raw.toLowerCase();
-  return items.filter(p =>
-    (p.id   || '').toLowerCase().includes(q) ||
-    (p.name || '').toLowerCase().includes(q)
-  );
+function setStatus(type, msg) {
+  const cls = { hint:'done', loading:'loading', done:'done', error:'error' }[type] || 'done';
+  const dot  = type === 'loading'
+    ? '<span class="dot pulse"></span>'
+    : (type === 'done' ? '<span class="dot"></span>' : '');
+  document.getElementById('product-load-status').innerHTML =
+    '<div class="status-bar"><span class="status-tag ' + cls + '">' + dot + msg + '</span></div>';
 }
 
-// 排序：完全符合 > ID 開頭符合 > 名稱開頭符合 > 其他包含
-function rankResults(items, raw) {
-  const q = raw.toLowerCase();
-  const score = p => {
-    const id   = (p.id   || '').toLowerCase();
-    const name = (p.name || '').toLowerCase();
-    if (id === q || name === q)        return 4; // 完全符合
-    if (id.startsWith(q))              return 3; // ID 開頭
-    if (name.startsWith(q))            return 2; // 名稱開頭
-    return 1;                                     // 包含在其中
-  };
-  return items.sort((a, b) => score(b) - score(a));
-}
-
-// 高亮關鍵字
-function highlight(text, q) {
+function hl(text, q) {
   if (!text || !q) return text || '-';
   const idx = text.toLowerCase().indexOf(q.toLowerCase());
   if (idx < 0) return text;
   return text.slice(0, idx) + '<mark>' + text.slice(idx, idx + q.length) + '</mark>' + text.slice(idx + q.length);
 }
 
-// 渲染搜尋結果
-function renderSearchResults(results, raw) {
-  const out = document.getElementById('product-results');
-
-  if (!results.length) {
-    document.getElementById('product-load-status').innerHTML =
-      `<div class="status-bar"><span class="status-tag error">找不到符合的商品</span></div>`;
-    out.innerHTML = `<div class="no-result">
-      <div class="emoji">🤔</div>
-      <p>找不到「${raw}」的商品</p>
-      <small>試試輸入更短的關鍵字或換個角度搜尋</small>
-    </div>`;
-    document.getElementById('filter-row').style.display = 'none';
-    return;
-  }
-
-  const total = results.length;
-  const show  = results.slice(0, 60);
-
-  document.getElementById('product-load-status').innerHTML =
-    `<div class="status-bar"><span class="status-tag done"><span class="dot"></span>找到 ${total} 筆${total > 60 ? '，顯示前 60 筆' : ''}</span></div>`;
-  document.getElementById('filter-row').style.display = 'flex';
-
-  let html = `<div class="product-list">`;
-  show.forEach((p, i) => {
-    html += `<div class="product-item" onclick='openDetail(${JSON.stringify(p)})'>
-      <div class="product-num">${i + 1}</div>
-      <div class="product-info">
-        <div class="product-id">${highlight(p.id || '-', raw)}</div>
-        <div class="product-name">${highlight(p.name || '-', raw)}</div>
-      </div>
-      <div class="product-arrow">›</div>
-    </div>`;
-  });
-  html += '</div>';
-  out.innerHTML = html;
+// ── DETAIL ──
+// 選到商品後，用 portal articles API 取完整欄位（價格、條碼等）
+function openDetail(enc) {
+  const item = JSON.parse(decodeURIComponent(escape(atob(enc))));
+  // 先用 dashboardservice 拿到的欄位顯示
+  currentProduct = {
+    id:   item.articleId,
+    name: item.articleName,
+    stationCode: currentStation.code,
+  };
+  renderDetail(currentProduct);
+  document.getElementById('mapping-btn').disabled = false;
+  document.getElementById('mapping-btn').innerHTML = '<span>🗺️</span> 查詢 Mapping Info';
+  document.getElementById('detail-modal').classList.add('active');
+  // 背景取完整明細補充欄位
+  enrichDetail(item.articleId);
 }
 
-// ── DETAIL ──
-function openDetail(product) {
-  currentProduct = product;
+async function enrichDetail(articleId) {
+  try {
+    // portal API 以 stationCode 拿全部，再找對應 id
+    // 因為沒有 single-item endpoint，用 searchKey 參數試試
+    const data = await apiGet(
+      '/portal/articles?page=0&size=50&sort=id,ASC&stationCode=' + currentStation.code
+        + '&searchKey=ARTICLE_ID&value=' + encodeURIComponent(articleId)
+    );
+    const list   = data.content || (Array.isArray(data) ? data : []);
+    const detail = list.find(p => p.id === articleId) || list[0];
+    if (detail) {
+      currentProduct = Object.assign({}, detail, { stationCode: detail.stationCode || currentStation.code });
+      renderDetail(currentProduct);
+    }
+  } catch(e) {
+    // 靜默失敗，保留已顯示的基本資料
+    console.warn('enrichDetail failed:', e.message);
+  }
+}
+
+function renderDetail(p) {
   const fields = [
-    { key:'stationCode',    label:'店別代碼', fallback: currentStation?.code },
-    { key:'id',             label:'Product ID', mono:true },
-    { key:'name',           label:'商品名稱' },
-    { key:'references',     label:'條碼參考', chips:true },
-    { key:'Original_Price', label:'原價', price:'pink' },
-    { key:'main_barcode',   label:'主條碼', mono:true },
-    { key:'sku',            label:'SKU', mono:true },
-    { key:'Item_Code',      label:'Item Code', mono:true },
-    { key:'Price',          label:'售價', price:'green' },
+    { key: 'stationCode',    label: '店別代碼' },
+    { key: 'id',             label: 'Product ID', mono: true },
+    { key: 'name',           label: '商品名稱' },
+    { key: 'references',     label: '條碼參考', chips: true },
+    { key: 'Original_Price', label: '原價', price: 'pink' },
+    { key: 'main_barcode',   label: '主條碼', mono: true },
+    { key: 'sku',            label: 'SKU', mono: true },
+    { key: 'Item_Code',      label: 'Item Code', mono: true },
+    { key: 'Price',          label: '售價', price: 'green' },
   ];
   let html = '';
   fields.forEach(f => {
-    let val = product[f.key] ?? f.fallback;
+    const val = p[f.key];
     if (val == null || val === '') return;
     let v = '';
-    if (f.chips)           v = String(val).split(',').map(x => `<span class="chip blue">${x.trim()}</span>`).join('');
-    else if (f.price==='green') v = `<span class="chip green">💰 NT$ ${val}</span>`;
-    else if (f.price==='pink')  v = `<span class="chip pink">🏷 NT$ ${val}</span>`;
-    else v = `<span class="${f.mono ? 'mono' : ''}">${val}</span>`;
-    html += `<div class="detail-row"><div class="detail-key">${f.label}</div><div class="detail-val">${v}</div></div>`;
+    if (f.chips)                  v = String(val).split(',').map(x => '<span class="chip blue">' + x.trim() + '</span>').join('');
+    else if (f.price === 'green') v = '<span class="chip green">💰 NT$ ' + val + '</span>';
+    else if (f.price === 'pink')  v = '<span class="chip pink">🏷 NT$ ' + val + '</span>';
+    else                          v = '<span class="' + (f.mono ? 'mono' : '') + '">' + val + '</span>';
+    html += '<div class="detail-row"><div class="detail-key">' + f.label + '</div><div class="detail-val">' + v + '</div></div>';
   });
-  html += `<div id="mapping-result"></div>`;
+  html += '<div id="mapping-result"></div>';
   document.getElementById('detail-body').innerHTML = html;
-  const btn = document.getElementById('mapping-btn');
-  btn.disabled = false;
-  btn.innerHTML = '<span>🗺️</span> 查詢 Mapping Info';
-  document.getElementById('detail-modal').classList.add('active');
 }
+
 function closeDetailModal() { document.getElementById('detail-modal').classList.remove('active'); }
 
 // ── MAPPING ──
 async function queryMappingInfo() {
   const btn = document.getElementById('mapping-btn');
   btn.disabled = true;
-  btn.innerHTML = `<div style="width:18px;height:18px;border:3px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.7s linear infinite"></div> 查詢中...`;
+  btn.innerHTML = '<div style="width:18px;height:18px;border:3px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.7s linear infinite"></div> 查詢中...';
   try {
     const stCode = currentProduct.stationCode || currentStation.code;
-    const data   = await apiGet(`/portal/articles/mappingInfo?stationCode=${stCode}&searchKey=ARTICLE_ID&value=${currentProduct.id}`);
+    const artId  = currentProduct.id;
+    const data   = await apiGet('/portal/articles/mappingInfo?stationCode=' + stCode + '&searchKey=ARTICLE_ID&value=' + artId);
     let eans = [];
     if (Array.isArray(data)) data.forEach(d => { if (d.eans) eans = eans.concat(d.eans); });
     else if (data.eans) eans = data.eans;
-    let html = `<div class="mapping-section"><div class="mapping-title">🗺️ Mapping Info</div>`;
-    if (eans.length) html += `<div class="ean-grid">${eans.map(e => `<div class="ean-item">${e}</div>`).join('')}</div>`;
-    html += `<div class="mapping-raw">${JSON.stringify(data, null, 2)}</div></div>`;
+    let html = '<div class="mapping-section"><div class="mapping-title">🗺️ Mapping Info</div>';
+    if (eans.length) html += '<div class="ean-grid">' + eans.map(e => '<div class="ean-item">' + e + '</div>').join('') + '</div>';
+    html += '<div class="mapping-raw">' + JSON.stringify(data, null, 2) + '</div></div>';
     document.getElementById('mapping-result').innerHTML = html;
     btn.innerHTML = '<span>✅</span> 查詢完成';
   } catch(e) {
     btn.disabled = false;
     btn.innerHTML = '<span>🗺️</span> 查詢 Mapping Info';
-    showToast('查詢失敗，請稍後再試');
+    showToast('查詢失敗：' + e.message);
   }
 }
 
@@ -666,10 +644,13 @@ function showToast(msg) {
   const t = document.createElement('div');
   t.className = 'toast'; t.textContent = msg;
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 2500);
+  setTimeout(() => t.remove(), 2800);
 }
+
+function setMode() {} // 舊 filter chip 相容
 
 window.addEventListener('DOMContentLoaded', init);
 </script>
+
 </body>
 </html>
