@@ -928,8 +928,8 @@
       }
     }
 
-    // --- AI AUTO GENERATION LOGIC ---
-    // --- AI AUTO GENERATION LOGIC ---
+  
+   // --- AI AUTO GENERATION LOGIC ---
     async function generateQuestionsWithAI() {
       const pdfFiles = document.getElementById('pdf-file-input').files;
       let textContent = document.getElementById('ai-text-input').value.trim();
@@ -949,7 +949,7 @@
         return;
       }
 
-      // 1. 檢查 SessionStorage 是否有 API Key，若無則要求輸入並暫存
+      // 1. 檢查 SessionStorage 是否有 API Key，若無則跳出輸入框並暫存
       let apiKey = sessionStorage.getItem('gemini_api_key');
       if (!apiKey) {
         const inputKey = prompt("請輸入您的 Google AI Studio API Key (格式為 AIzaSy...):");
@@ -1008,8 +1008,8 @@ ${textContent}
 ]
 `;
 
-        // 2. 呼叫 Gemini API（帶入動態取得的 Key）
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+        // 2. 使用標準的 gemini-2.0-flash 或 gemini-1.5-flash 端點
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1021,11 +1021,11 @@ ${textContent}
         });
 
         if (!response.ok) {
-          // 若傳回 400/403 等 Key 錯誤，清除暫存以便下次重新輸入
-          if (response.status === 400 || response.status === 403) {
+          // 若為 400/403/404 錯，自動清除 SessionKey 方便重新輸入
+          if (response.status === 400 || response.status === 403 || response.status === 404) {
             sessionStorage.removeItem('gemini_api_key');
           }
-          throw new Error(`Gemini API 請求失敗 (HTTP ${response.status})，請確認 Key 是否正確或網路代理設定。`);
+          throw new Error(`Gemini API 請求失敗 (HTTP ${response.status})，已清除 Key 暫存，請重試並確認 Key 與網路狀態。`);
         }
 
         const data = await response.json();
