@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>線上測驗與題庫管理系統 (SQLite 整合版)</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- PDF.js for extraction -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- SQL.js (SQLite WebAssembly) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  </script>
+  <style>
+    .glass-effect {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+    }
+  </style>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 flex flex-col font-sans">
+
+  <!-- Header Section -->
+  <header class="bg-indigo-700 text-white shadow-md">
+    <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+      <div class="flex items-center space-x-3">
+        <i class="fa-solid me-2 fa-clipboard-question text-2xl text-amber-300"></i>
+        <h1 class="text-xl md:text-2xl font-bold tracking-wide">企業線上測驗系統</h1>
+      </div>
+      <div id="user-status" class="hidden flex items-center space-x-4">
+        <span class="text-sm bg-indigo-800 px-3 py-1.5 rounded-full border border-indigo-500">
+          <i class="fa-solid fa-user me-1 text-indigo-300"></i>
+          工號：<span id="current-user-id" class="font-bold text-amber-300"></span>
+          <span id="admin-badge" class="hidden ml-2 bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded">管理員</span>
+        </span>
+        <button onclick="logout()" class="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded transition font-medium">
+          <i class="fa-solid fa-right-from-bracket me-1"></i>登出
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-grow max-w-6xl w-full mx-auto p-4 md:p-6 flex flex-col justify-center">
+
+    <!-- 1. LOGIN VIEW -->
+    <section id="login-view" class="max-w-md w-full mx-auto glass-effect p-8 rounded-2xl shadow-xl border border-white/50 my-auto">
+      <div class="text-center mb-6">
+        <div class="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-3 text-2xl shadow-inner">
+          <i class="fa-solid fa-id-card"></i>
+        </div>
+        <h2 class="text-2xl font-bold text-slate-800">員工身份驗證</h2>
+        <p class="text-xs text-slate-500 mt-1">請輸入您的員工工號開始測驗</p>
+      </div>
+      <form onsubmit="handleLogin(event)" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">員工工號</label>
+          <div class="relative">
+            <input type="text" id="employee-id-input" required placeholder="例如：E12345 (管理員: adminA710)" 
+              class="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition text-sm">
+            <i class="fa-solid fa-user-gear absolute left-3 top-3.5 text-slate-400"></i>
+          </div>
+        </div>
+        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-lg transition shadow-md flex items-center justify-center space-x-2">
+          <span>進入測驗系統</span>
+          <i class="fa-solid fa-arrow-right text-xs"></i>
+        </button>
+      </form>
+    </section>
+
+    <!-- 2. DASHBOARD VIEW (AFTER LOGIN) -->
+    <section id="dashboard-view" class="hidden space-y-6">
+      
+      <!-- Top Navigation Tabs (For Admin Only) -->
+      <div id="admin-tabs" class="hidden flex border-b border-slate-200 bg-white rounded-t-xl px-4 pt-3 space-x-2 shadow-sm">
+        <button onclick="switchTab('exam')" id="tab-btn-exam" class="tab-btn py-2 px-4 font-semibold text-sm border-b-2 border-indigo-600 text-indigo-600 transition">
+          <i class="fa-solid fa-pen-to-square me-2"></i>線上測驗
+        </button>
+        <button onclick="switchTab('manage')" id="tab-btn-manage" class="tab-btn py-2 px-4 font-semibold text-sm border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition">
+          <i class="fa-solid fa-list-check me-2"></i>題庫管理
+        </button>
+        <button onclick="switchTab('ai-gen')" id="tab-btn-ai-gen" class="tab-btn py-2 px-4 font-semibold text-sm border-b-2 border-transparent text-slate-500 hover:text-slate-700 transition">
+          <i class="fa-solid fa-wand-magic-sparkles me-2 text-purple-600"></i>PDF/文件 AI 自動出題
+        </button>
+      </div>
+
+      <!-- TAB 1: EXAM SECTION -->
+      <div id="tab-content-exam" class="bg-white p-6 md:p-8 rounded-xl shadow-md border border-slate-200">
+        <div id="exam-start-card" class="text-center py-8 max-w-lg mx-auto">
+          <i class="fa-solid fa-file-signature text-5xl text-indigo-500 mb-4"></i>
+          <h3 class="text-2xl font-bold text-slate-800 mb-2">準備開始測驗</h3>
+          <p class="text-sm text-slate-600 mb-6">本測驗包含是非題、選擇題與簡答題，用於評估相關業務與法規知識。請確認準備完成後點擊開始。</p>
+          <button onclick="startExam()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-xl transition shadow-lg text-lg transform hover:-translate-y-0.5">
+            <i class="fa-solid fa-play me-2"></i>開始答題
+          </button>
+        </div>
+
+        <div id="exam-active-card" class="hidden space-y-8">
+          <div class="flex justify-between items-center border-b pb-4">
+            <div>
+              <h3 class="text-xl font-bold text-slate-800">測驗進行中</h3>
+              <p class="text-xs text-slate-500">工號：<span class="exam-user-display font-semibold"></span></p>
+            </div>
+            <span id="exam-progress" class="text-sm font-semibold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-200">
+              共 <span id="total-questions-count">0</span> 題
+            </span>
+          </div>
+
+          <div id="exam-questions-list" class="space-y-6"></div>
+
+          <div class="pt-4 border-t flex justify-end">
+            <button onclick="submitExam()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-lg transition shadow-md">
+              <i class="fa-solid fa-paper-plane me-2"></i>提交答卷
+            </button>
+          </div>
+        </div>
+
+        <div id="exam-result-card" class="hidden space-y-6">
+          <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-6 text-center">
+            <div class="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3 text-3xl">
+              <i class="fa-solid fa-circle-check"></i>
+            </div>
+            <h3 class="text-2xl font-bold text-emerald-800">測驗已完成！</h3>
+            <p class="text-sm text-emerald-600 mt-1">答題紀錄已儲存</p>
+            
+            <div class="mt-4 inline-block bg-white px-6 py-3 rounded-lg shadow-sm border border-emerald-200">
+              <span class="text-slate-500 text-sm">客觀題（是非/選擇）得分：</span>
+              <span id="exam-score" class="text-3xl font-extrabold text-indigo-600 mx-2">0</span>
+              <span class="text-slate-500 text-sm">分</span>
+            </div>
+          </div>
+
+          <div class="space-y-4">
+            <h4 class="text-lg font-bold text-slate-800 border-l-4 border-indigo-600 pl-3">答題結果對照與檢討</h4>
+            <div id="exam-review-list" class="space-y-4"></div>
+          </div>
+
+          <div class="text-center pt-4">
+            <button onclick="resetExamUI()" class="bg-slate-600 hover:bg-slate-700 text-white font-medium py-2 px-6 rounded-lg transition">
+              <i class="fa-solid fa-rotate-left me-2"></i>返回測驗主頁
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: QUESTION MANAGEMENT SECTION (ADMIN ONLY) -->
+      <div id="tab-content-manage" class="hidden bg-white p-6 md:p-8 rounded-xl shadow-md border border-slate-200 space-y-6">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4">
+          <div>
+            <h3 class="text-xl font-bold text-slate-800">題庫維護與編輯 (SQLite 持久化)</h3>
+            <p class="text-xs text-slate-500">管理人員可手動新增、修改或刪除 SQLite 資料庫內的試題</p>
+          </div>
+          <button onclick="openQuestionModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold py-2 px-4 rounded-lg transition shadow flex items-center justify-center space-x-2">
+            <i class="fa-solid fa-plus"></i>
+            <span>新增試題</span>
+          </button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr class="bg-slate-100 text-slate-700 border-b">
+                <th class="py-3 px-4 w-20">類型</th>
+                <th class="py-3 px-4">題目內容與情境圖</th>
+                <th class="py-3 px-4">參考答案/選項</th>
+                <th class="py-3 px-4 text-center w-28">操作</th>
+              </tr>
+            </thead>
+            <tbody id="question-table-body" class="divide-y divide-slate-200"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TAB 3: AI AUTO-GENERATION SECTION (ADMIN ONLY) -->
+      <div id="tab-content-ai-gen" class="hidden bg-white p-6 md:p-8 rounded-xl shadow-md border border-slate-200 space-y-6">
+        <div>
+          <h3 class="text-xl font-bold text-slate-800 flex items-center space-x-2">
+            <i class="fa-solid fa-wand-magic-sparkles text-purple-600"></i>
+            <span>PDF / 文件 AI 自動出題功能</span>
+          </h3>
+          <p class="text-xs text-slate-500 mt-1">可支援多檔 PDF 同時上傳或貼上文本，AI 將自動分析並生成題目供審核與批次匯入 SQLite</p>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div class="space-y-4 bg-slate-50 p-5 rounded-xl border border-slate-200">
+            <div>
+              <label class="block text-sm font-semibold text-slate-700 mb-1">上傳 PDF 文件（可按住 Ctrl/Cmd 多選）</label>
+              <input type="file" id="pdf-file-input" accept=".pdf" multiple class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 transition cursor-pointer border rounded-lg bg-white">
+            </div>
+
+            <div class="relative flex py-1 items-center">
+              <div class="flex-grow border-t border-slate-300"></div>
+              <span class="flex-shrink mx-4 text-xs text-slate-400 font-bold">或貼上文本內容</span>
+              <div class="flex-grow border-t border-slate-300"></div>
+            </div>
+
+            <div>
+              <textarea id="ai-text-input" rows="5" placeholder="請在此貼上教材、法規或標準作業程序 (SOP) 內容..." class="w-full p-3 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"></textarea>
+            </div>
+
+            <div class="grid grid-cols-3 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">是非題數量</label>
+                <input type="number" id="ai-tf-count" value="2" min="0" max="5" class="w-full p-2 border rounded-lg text-sm">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">選擇題數量</label>
+                <input type="number" id="ai-mc-count" value="2" min="0" max="5" class="w-full p-2 border rounded-lg text-sm">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">簡答題數量</label>
+                <input type="number" id="ai-sa-count" value="1" min="0" max="5" class="w-full p-2 border rounded-lg text-sm">
+              </div>
+            </div>
+
+            <button onclick="generateQuestionsWithAI()" id="ai-gen-btn" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2.5 rounded-lg transition shadow-md flex items-center justify-center space-x-2">
+              <i class="fa-solid fa-robot"></i>
+              <span>開始 AI 分析並產生題目</span>
+            </button>
+          </div>
+
+          <div class="space-y-3 flex flex-col">
+            <div class="flex items-center justify-between border-b pb-2">
+              <h4 class="text-sm font-semibold text-slate-700">AI 產出建議試題 (審核區)</h4>
+              <span id="ai-status-badge" class="hidden text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-medium">生成完成</span>
+            </div>
+
+            <div id="ai-batch-bar" class="hidden bg-purple-50 border border-purple-200 p-2.5 rounded-lg flex items-center justify-between">
+              <label class="flex items-center space-x-2 text-xs font-bold text-slate-700 cursor-pointer">
+                <input type="checkbox" id="ai-select-all" onchange="toggleSelectAllAI(this.checked)" class="rounded text-purple-600 focus:ring-purple-500 w-4 h-4">
+                <span>全選 / 取消全選</span>
+              </label>
+              <button onclick="adoptBatchAIQuestions()" class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold py-1.5 px-3 rounded shadow transition flex items-center space-x-1">
+                <i class="fa-solid fa-square-plus"></i>
+                <span>一鍵批次採用勾選試題</span>
+              </button>
+            </div>
+
+            <div id="ai-results-container" class="flex-grow bg-slate-50 border border-slate-200 rounded-xl p-4 overflow-y-auto max-h-[500px] space-y-4">
+              <div id="ai-empty-placeholder" class="h-full flex flex-col items-center justify-center text-slate-400 text-center py-12">
+                <i class="fa-solid fa-file-circle-question text-4xl mb-2"></i>
+                <p class="text-sm">尚未產生題目</p>
+                <p class="text-xs mt-1">請於左側輸入資料並點擊產生</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- MODAL: ADD / EDIT QUESTION -->
+  <div id="question-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white max-w-lg w-full rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div class="bg-indigo-700 text-white px-6 py-4 flex justify-between items-center">
+        <h3 id="modal-title" class="font-bold text-lg">新增題目</h3>
+        <button onclick="closeQuestionModal()" class="text-white/80 hover:text-white text-xl"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form onsubmit="saveQuestion(event)" class="p-6 space-y-4 overflow-y-auto">
+        <input type="hidden" id="edit-question-id">
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">題目類型</label>
+          <select id="modal-q-type" onchange="toggleTypeFields()" class="w-full p-2 border rounded-lg text-sm bg-slate-50 focus:ring-2 focus:ring-indigo-500">
+            <option value="tf">是非題</option>
+            <option value="mc">選擇題 (單選)</option>
+            <option value="sa">簡答題</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">題目內文 (說明與情境)</label>
+          <textarea id="modal-q-title" required rows="3" class="w-full p-2.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500" placeholder="請輸入題目細節..."></textarea>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">上傳情境圖片（可選）</label>
+          <input type="file" id="modal-q-image-input" accept="image/*" onchange="handleImagePreview(event)" class="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200">
+          <div id="image-preview-container" class="hidden mt-2 relative inline-block">
+            <img id="image-preview" src="" alt="情境圖預覽" onclick="if(this.src) openImageLightbox(this.src)" class="max-h-36 rounded border shadow-sm cursor-zoom-in hover:opacity-90 transition" title="點擊放大圖片">
+            <button type="button" onclick="removePreviewImage()" class="absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+        </div>
+
+        <div id="tf-answer-box">
+          <label class="block text-xs font-semibold text-slate-700 mb-1">正確答案 (是非題)</label>
+          <div class="flex space-x-6">
+            <label class="flex items-center space-x-2 text-sm cursor-pointer">
+              <input type="radio" name="modal-tf-ans" value="true" checked class="text-indigo-600 focus:ring-indigo-500">
+              <span class="font-bold text-emerald-600"><i class="fa-solid fa-circle-check me-1"></i>正確 (O)</span>
+            </label>
+            <label class="flex items-center space-x-2 text-sm cursor-pointer">
+              <input type="radio" name="modal-tf-ans" value="false" class="text-indigo-600 focus:ring-indigo-500">
+              <span class="font-bold text-red-600"><i class="fa-solid fa-circle-xmark me-1"></i>錯誤 (X)</span>
+            </label>
+          </div>
+        </div>
+
+        <div id="mc-answer-box" class="hidden space-y-2">
+          <label class="block text-xs font-semibold text-slate-700">選項內容與正確答案 (點選單選鈕指定答案)</label>
+          <div class="space-y-2">
+            <div class="flex items-center space-x-2">
+              <input type="radio" name="modal-mc-correct" value="0" checked class="text-indigo-600 focus:ring-indigo-500">
+              <span class="text-xs font-bold text-slate-600">A.</span>
+              <input type="text" id="modal-mc-opt-0" class="flex-grow p-1.5 border rounded text-xs" placeholder="選項 A 內容">
+            </div>
+            <div class="flex items-center space-x-2">
+              <input type="radio" name="modal-mc-correct" value="1" class="text-indigo-600 focus:ring-indigo-500">
+              <span class="text-xs font-bold text-slate-600">B.</span>
+              <input type="text" id="modal-mc-opt-1" class="flex-grow p-1.5 border rounded text-xs" placeholder="選項 B 內容">
+            </div>
+            <div class="flex items-center space-x-2">
+              <input type="radio" name="modal-mc-correct" value="2" class="text-indigo-600 focus:ring-indigo-500">
+              <span class="text-xs font-bold text-slate-600">C.</span>
+              <input type="text" id="modal-mc-opt-2" class="flex-grow p-1.5 border rounded text-xs" placeholder="選項 C 內容">
+            </div>
+            <div class="flex items-center space-x-2">
+              <input type="radio" name="modal-mc-correct" value="3" class="text-indigo-600 focus:ring-indigo-500">
+              <span class="text-xs font-bold text-slate-600">D.</span>
+              <input type="text" id="modal-mc-opt-3" class="flex-grow p-1.5 border rounded text-xs" placeholder="選項 D 內容">
+            </div>
+          </div>
+        </div>
+
+        <div id="sa-answer-box" class="hidden">
+          <label class="block text-xs font-semibold text-slate-700 mb-1">參考解答 (簡答題)</label>
+          <textarea id="modal-sa-ans" rows="2" class="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500" placeholder="輸入此簡答題的關鍵得分要點..."></textarea>
+        </div>
+
+        <div class="pt-4 flex justify-end space-x-3 border-t">
+          <button type="button" onclick="closeQuestionModal()" class="px-4 py-2 border text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50">取消</button>
+          <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 shadow">儲存題目</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: DELETE CONFIRMATION -->
+  <div id="delete-modal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white max-w-sm w-full rounded-xl shadow-xl p-6 text-center space-y-4">
+      <div class="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto text-2xl">
+        <i class="fa-solid fa-trash-can"></i>
+      </div>
+      <h3 class="font-bold text-slate-800 text-lg">確認刪除題目</h3>
+      <p class="text-sm text-slate-600">您確定要刪除這筆試題嗎？此操作將同步自 SQLite 中永久刪除。</p>
+      <div class="flex justify-center space-x-3 pt-2">
+        <button onclick="closeDeleteModal()" class="w-1/2 border border-slate-300 hover:bg-slate-50 text-slate-700 py-2 rounded-lg text-sm font-semibold transition">取消</button>
+        <button onclick="confirmDeleteQuestion()" class="w-1/2 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg text-sm font-semibold shadow transition">確認刪除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom Alert/Notification Modal -->
+  <div id="notification-modal" class="hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-6 text-center space-y-4">
+      <div id="notification-icon" class="w-12 h-12 rounded-full flex items-center justify-center mx-auto text-2xl"></div>
+      <h4 id="notification-title" class="font-bold text-slate-800 text-lg">通知</h4>
+      <p id="notification-message" class="text-sm text-slate-600"></p>
+      <button onclick="closeNotification()" class="w-full bg-slate-800 hover:bg-slate-900 text-white py-2 rounded-lg text-sm font-semibold transition">確定</button>
+    </div>
+  </div>
+
+  <!-- MODAL: IMAGE LIGHTBOX / ZOOM -->
+  <div id="image-lightbox-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[60] flex items-center justify-center p-4 transition-all duration-300 cursor-pointer" onclick="closeImageLightbox()">
+    <div class="relative max-w-5xl max-h-[90vh] flex flex-col items-center justify-center" onclick="event.stopPropagation()">
+      <button onclick="closeImageLightbox()" class="absolute -top-10 right-0 text-white hover:text-amber-300 text-sm font-bold transition flex items-center space-x-1 focus:outline-none">
+        <i class="fa-solid fa-xmark text-lg"></i>
+        <span>關閉 (ESC)</span>
+      </button>
+      <img id="lightbox-image" src="" alt="放大圖片" class="max-w-full max-h-[85vh] rounded-xl shadow-2xl object-contain border border-white/20">
+    </div>
+  </div>
+
+  <script>
+    // System Global State
+    let currentUser = null;
+    let isAdmin = false;
+    let currentImageBase64 = null;
+    let questionToDeleteId = null;
+    let aiGeneratedCache = [];
+
+    // SQLite Global Database Instances
+    let db = null;
+    let questions = [];
+
+    // Initialize App & SQLite Database
+    window.onload = async function() {
+      await initSQLite();
+      loadQuestionsFromSQLite();
+      renderQuestionsTable();
+
+      window.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          closeImageLightbox();
+        }
+      });
+    };
+
+    // --- SQLITE DATABASE OPERATIONS ---
+    async function initSQLite() {
+      const SQL = await initSqlJs({
+        locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+      });
+
+      const savedDb = localStorage.getItem('sqlite_exam_db');
+      if (savedDb) {
+        const u8Array = new Uint8Array(JSON.parse(savedDb));
+        db = new SQL.Database(u8Array);
+      } else {
+        db = new SQL.Database();
+        // Create Questions Table
+        db.run(`
+          CREATE TABLE questions (
+            id TEXT PRIMARY KEY,
+            type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            image TEXT,
+            options TEXT,
+            answer TEXT NOT NULL
+          );
+        `);
+
+        // Insert Default Data into SQLite
+        const defaultQuestions = [
+          {
+            id: 'q1',
+            type: 'tf',
+            title: '進入特定工作區域時，必須全程佩戴安全帽與適當防護具。',
+            image: null,
+            options: null,
+            answer: 'true'
+          },
+          {
+            id: 'q2',
+            type: 'mc',
+            title: '當作業現場發生化學品洩漏時，第一時間應採取的正確處置是？',
+            image: null,
+            options: JSON.stringify(['立即開窗並啟動排風設備並通報', '直接用手清理', '假裝沒看到繼續工作', '用水直接大量沖洗所有化學品']),
+            answer: '0'
+          },
+          {
+            id: 'q3',
+            type: 'sa',
+            title: '請簡述當作業現場發生緊急火災時的基本應變處理流程（通報、滅火、避難等）。',
+            image: null,
+            options: null,
+            answer: '1. 保持冷靜並大聲呼救通知周遭同仁。\n2. 立即按下火災警報器與通報主管。\n3. 在初期小火評估安全下使用滅火器，若火勢過大則沿避難路線迅速撤離。'
+          }
+        ];
+
+        const stmt = db.prepare("INSERT INTO questions VALUES (?, ?, ?, ?, ?, ?)");
+        defaultQuestions.forEach(q => {
+          stmt.run([q.id, q.type, q.title, q.image, q.options, q.answer]);
+        });
+        stmt.free();
+
+        saveSQLiteToStorage();
+      }
+    }
+
+    // Save DB Binaries to localStorage
+    function saveSQLiteToStorage() {
+      if (!db) return;
+      const data = db.export();
+      const array = Array.from(data);
+      localStorage.setItem('sqlite_exam_db', JSON.stringify(array));
+    }
+
+    // Load All Questions from SQLite Database
+    function loadQuestionsFromSQLite() {
+      if (!db) return;
+      questions = [];
+      const res = db.exec("SELECT id, type, title, image, options, answer FROM questions");
+      if (res.length > 0) {
+        const rows = res[0].values;
+        rows.forEach(r => {
+          questions.push({
+            id: r[0],
+            type: r[1],
+            title: r[2],
+            image: r[3],
+            options: r[4] ? JSON.parse(r[4]) : null,
+            answer: r[5]
+          });
+        });
+      }
+    }
+
+    // User Login Handler
+    function handleLogin(e) {
+      e.preventDefault();
+      const input = document.getElementById('employee-id-input').value.trim();
+      if (!input) return;
+
+      currentUser = input;
+      isAdmin = (input === 'adminA710');
+
+      document.getElementById('current-user-id').textContent = currentUser;
+      document.querySelectorAll('.exam-user-display').forEach(el => el.textContent = currentUser);
+      document.getElementById('user-status').classList.remove('hidden');
+      
+      if (isAdmin) {
+        document.getElementById('admin-badge').classList.remove('hidden');
+        document.getElementById('admin-tabs').classList.remove('hidden');
+      } else {
+        document.getElementById('admin-badge').classList.add('hidden');
+        document.getElementById('admin-tabs').classList.add('hidden');
+      }
+
+      document.getElementById('login-view').classList.add('hidden');
+      document.getElementById('dashboard-view').classList.remove('hidden');
+
+      switchTab('exam');
+    }
+
+    function logout() {
+      currentUser = null;
+      isAdmin = false;
+      document.getElementById('employee-id-input').value = '';
+      document.getElementById('user-status').classList.add('hidden');
+      document.getElementById('dashboard-view').classList.add('hidden');
+      document.getElementById('login-view').classList.remove('hidden');
+      resetExamUI();
+    }
+
+    function switchTab(tabName) {
+      const tabs = ['exam', 'manage', 'ai-gen'];
+      tabs.forEach(t => {
+        const content = document.getElementById(`tab-content-${t}`);
+        const btn = document.getElementById(`tab-btn-${t}`);
+        
+        if (content) {
+          if (t === tabName) {
+            content.classList.remove('hidden');
+            if (btn) {
+              btn.classList.add('border-indigo-600', 'text-indigo-600');
+              btn.classList.remove('border-transparent', 'text-slate-500');
+            }
+          } else {
+            content.classList.add('hidden');
+            if (btn) {
+              btn.classList.remove('border-indigo-600', 'text-indigo-600');
+              btn.classList.add('border-transparent', 'text-slate-500');
+            }
+          }
+        }
+      });
+    }
+
+    // --- EXAM LOGIC ---
+    function startExam() {
+      if (questions.length === 0) {
+        showNotification('提示', '目前系統中尚無試題，請聯繫管理員新增題目。', 'info');
+        return;
+      }
+
+      document.getElementById('exam-start-card').classList.add('hidden');
+      document.getElementById('exam-active-card').classList.remove('hidden');
+      document.getElementById('exam-result-card').classList.add('hidden');
+
+      document.getElementById('total-questions-count').textContent = questions.length;
+
+      const container = document.getElementById('exam-questions-list');
+      container.innerHTML = '';
+
+      const optionLabels = ['A', 'B', 'C', 'D'];
+
+      questions.forEach((q, idx) => {
+        const qCard = document.createElement('div');
+        qCard.className = 'p-5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3';
+        
+        const typeBadgeName = q.type === 'tf' ? '是非題' : (q.type === 'mc' ? '選擇題' : '簡答題');
+
+        let contentHTML = `
+          <div class="flex items-start space-x-3">
+            <span class="bg-indigo-600 text-white font-bold text-xs px-2.5 py-1 rounded-md mt-0.5">Q${idx + 1}</span>
+            <div class="flex-grow">
+              <span class="text-xs font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 me-2">
+                ${typeBadgeName}
+              </span>
+              <p class="text-slate-800 font-medium inline leading-relaxed">${escapeHtml(q.title)}</p>
+            </div>
+          </div>
+        `;
+
+        if (q.image) {
+          contentHTML += `
+            <div class="ml-9 my-2">
+              <img src="${q.image}" alt="情境圖" onclick="openImageLightbox('${q.image}')" class="max-h-52 rounded border shadow-sm cursor-zoom-in hover:opacity-90 hover:shadow-md transition" title="點擊檢視大圖">
+            </div>
+          `;
+        }
+
+        if (q.type === 'tf') {
+          contentHTML += `
+            <div class="ml-9 flex space-x-6 pt-2">
+              <label class="flex items-center space-x-2 text-sm cursor-pointer bg-white px-4 py-2 rounded-lg border border-slate-200 hover:border-indigo-300">
+                <input type="radio" name="ans-${q.id}" value="true" class="text-indigo-600 focus:ring-indigo-500">
+                <span class="font-medium text-slate-700">正確 (O)</span>
+              </label>
+              <label class="flex items-center space-x-2 text-sm cursor-pointer bg-white px-4 py-2 rounded-lg border border-slate-200 hover:border-indigo-300">
+                <input type="radio" name="ans-${q.id}" value="false" class="text-indigo-600 focus:ring-indigo-500">
+                <span class="font-medium text-slate-700">錯誤 (X)</span>
+              </label>
+            </div>
+          `;
+        } else if (q.type === 'mc') {
+          contentHTML += `<div class="ml-9 grid grid-cols-1 md:grid-cols-2 gap-2 pt-2">`;
+          (q.options || []).forEach((opt, optIdx) => {
+            contentHTML += `
+              <label class="flex items-center space-x-2 text-sm cursor-pointer bg-white p-3 rounded-lg border border-slate-200 hover:border-indigo-300">
+                <input type="radio" name="ans-${q.id}" value="${optIdx}" class="text-indigo-600 focus:ring-indigo-500">
+                <span class="font-bold text-indigo-600 text-xs">${optionLabels[optIdx]}.</span>
+                <span class="font-medium text-slate-700">${escapeHtml(opt)}</span>
+              </label>
+            `;
+          });
+          contentHTML += `</div>`;
+        } else {
+          contentHTML += `
+            <div class="ml-9 pt-2">
+              <textarea id="ans-${q.id}" rows="3" placeholder="請填寫您的回答..." class="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500"></textarea>
+            </div>
+          `;
+        }
+
+        qCard.innerHTML = contentHTML;
+        container.appendChild(qCard);
+      });
+    }
+
+    function submitExam() {
+      let scoreCount = 0;
+      let totalObjective = 0;
+      const reviewContainer = document.getElementById('exam-review-list');
+      reviewContainer.innerHTML = '';
+      const optionLabels = ['A', 'B', 'C', 'D'];
+
+      questions.forEach((q, idx) => {
+        let userAns = '';
+        let isCorrect = false;
+
+        if (q.type === 'tf' || q.type === 'mc') {
+          totalObjective++;
+          const selected = document.querySelector(`input[name="ans-${q.id}"]:checked`);
+          userAns = selected ? selected.value.trim() : 'unanswered';
+          isCorrect = (userAns === String(q.answer).trim());
+          if (isCorrect) scoreCount++;
+        } else {
+          const textEl = document.getElementById(`ans-${q.id}`);
+          userAns = textEl ? textEl.value.trim() : '';
+        }
+
+        const finalScore = totalObjective > 0 ? Math.round((scoreCount / totalObjective) * 100) : 100;
+        document.getElementById('exam-score').textContent = finalScore;
+
+        const reviewItem = document.createElement('div');
+        reviewItem.className = 'p-4 rounded-lg border border-slate-200 bg-white space-y-2';
+
+        const typeBadgeName = q.type === 'tf' ? '是非題' : (q.type === 'mc' ? '選擇題' : '簡答題');
+
+        let reviewHTML = `
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-bold text-slate-800">Q${idx + 1}. [${typeBadgeName}] ${escapeHtml(q.title)}</span>
+            ${q.type !== 'sa' ? (
+              isCorrect ? 
+              '<span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded-full"><i class="fa-solid fa-check me-1"></i>答對</span>' :
+              '<span class="text-xs bg-red-100 text-red-800 font-bold px-2.5 py-1 rounded-full"><i class="fa-solid fa-xmark me-1"></i>答錯</span>'
+            ) : '<span class="text-xs bg-slate-100 text-slate-700 px-2.5 py-1 rounded-full">主觀簡答題</span>'}
+          </div>
+        `;
+
+        if (q.type === 'tf') {
+          const userAnsText = userAns === 'true' ? '正確 (O)' : (userAns === 'false' ? '錯誤 (X)' : '未作答');
+          const correctAnsText = String(q.answer).trim() === 'true' ? '正確 (O)' : '錯誤 (X)';
+          reviewHTML += `
+            <div class="text-xs space-y-1 pt-1 bg-slate-50 p-2.5 rounded border">
+              <div><span class="text-slate-500">您的答案：</span><span class="${isCorrect ? 'text-emerald-700 font-semibold' : 'text-red-600 font-semibold'}">${userAnsText}</span></div>
+              <div><span class="text-slate-500">正確解答：</span><span class="text-indigo-700 font-semibold">${correctAnsText}</span></div>
+            </div>
+          `;
+        } else if (q.type === 'mc') {
+          const uIdx = parseInt(userAns);
+          const cIdx = parseInt(q.answer);
+          const userAnsText = isNaN(uIdx) ? '未作答' : `${optionLabels[uIdx]}. ${q.options[uIdx] || ''}`;
+          const correctAnsText = `${optionLabels[cIdx]}. ${q.options[cIdx] || ''}`;
+
+          reviewHTML += `
+            <div class="text-xs space-y-1 pt-1 bg-slate-50 p-2.5 rounded border">
+              <div><span class="text-slate-500">您的選擇：</span><span class="${isCorrect ? 'text-emerald-700 font-semibold' : 'text-red-600 font-semibold'}">${userAnsText}</span></div>
+              <div><span class="text-slate-500">正確解答：</span><span class="text-indigo-700 font-semibold">${correctAnsText}</span></div>
+            </div>
+          `;
+        } else {
+          reviewHTML += `
+            <div class="text-xs space-y-1 pt-1 bg-slate-50 p-2.5 rounded border">
+              <div><span class="text-slate-500">您的回答：</span><p class="text-slate-800 mt-0.5 whitespace-pre-line bg-white p-2 rounded border">${escapeHtml(userAns) || '(無內容)'}</p></div>
+              <div><span class="text-slate-500">參考點評/解答關鍵：</span><p class="text-indigo-800 font-medium mt-0.5 whitespace-pre-line bg-indigo-50/50 p-2 rounded border border-indigo-100">${escapeHtml(q.answer)}</p></div>
+            </div>
+          `;
+        }
+
+        reviewItem.innerHTML = reviewHTML;
+        reviewContainer.appendChild(reviewItem);
+      });
+
+      document.getElementById('exam-active-card').classList.add('hidden');
+      document.getElementById('exam-result-card').classList.remove('hidden');
+    }
+
+    function resetExamUI() {
+      document.getElementById('exam-start-card').classList.remove('hidden');
+      document.getElementById('exam-active-card').classList.add('hidden');
+      document.getElementById('exam-result-card').classList.add('hidden');
+    }
+
+    // --- QUESTION MANAGEMENT LOGIC ---
+    function renderQuestionsTable() {
+      const tbody = document.getElementById('question-table-body');
+      tbody.innerHTML = '';
+
+      if (questions.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-slate-400">目前 SQLite 題庫無資料</td></tr>`;
+        return;
+      }
+
+      const optionLabels = ['A', 'B', 'C', 'D'];
+
+      questions.forEach(q => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-50 transition';
+
+        let typeBadge = '';
+        if (q.type === 'tf') {
+          typeBadge = '<span class="bg-indigo-100 text-indigo-800 text-xs px-2 py-0.5 rounded font-semibold">是非</span>';
+        } else if (q.type === 'mc') {
+          typeBadge = '<span class="bg-emerald-100 text-emerald-800 text-xs px-2 py-0.5 rounded font-semibold">選擇</span>';
+        } else {
+          typeBadge = '<span class="bg-purple-100 text-purple-800 text-xs px-2 py-0.5 rounded font-semibold">簡答</span>';
+        }
+
+        let answerText = '';
+        if (q.type === 'tf') {
+          answerText = String(q.answer).trim() === 'true' ? '<span class="text-emerald-600 font-bold">O (正確)</span>' : '<span class="text-red-600 font-bold">X (錯誤)</span>';
+        } else if (q.type === 'mc') {
+          const cIdx = parseInt(q.answer);
+          answerText = `<span class="text-xs text-slate-700 font-medium">解答: <strong class="text-indigo-600">${optionLabels[cIdx] || ''}</strong></span>`;
+        } else {
+          answerText = `<span class="text-xs text-slate-600 block max-w-xs truncate">${escapeHtml(q.answer)}</span>`;
+        }
+
+        tr.innerHTML = `
+          <td class="py-3 px-4">${typeBadge}</td>
+          <td class="py-3 px-4">
+            <p class="font-medium text-slate-800 max-w-md">${escapeHtml(q.title)}</p>
+            ${q.image ? `<img src="${q.image}" alt="縮圖" onclick="openImageLightbox('${q.image}')" class="h-10 mt-1 rounded border cursor-zoom-in hover:opacity-80 transition" title="點擊放大觀看">` : ''}
+          </td>
+          <td class="py-3 px-4">${answerText}</td>
+          <td class="py-3 px-4 text-center space-x-2">
+            <button onclick="editQuestion('${q.id}')" class="text-indigo-600 hover:text-indigo-900 p-1" title="編輯"><i class="fa-solid fa-pen-to-square"></i></button>
+            <button onclick="openDeleteModal('${q.id}')" class="text-red-600 hover:text-red-900 p-1" title="刪除"><i class="fa-solid fa-trash-can"></i></button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function openQuestionModal(editId = null) {
+      document.getElementById('edit-question-id').value = editId || '';
+      document.getElementById('modal-title').textContent = editId ? '編輯題目' : '新增題目';
+      
+      currentImageBase64 = null;
+      removePreviewImage();
+
+      if (editId) {
+        const q = questions.find(item => item.id === editId);
+        if (q) {
+          document.getElementById('modal-q-type').value = q.type;
+          document.getElementById('modal-q-title').value = q.title;
+          
+          if (q.type === 'tf') {
+            document.querySelector(`input[name="modal-tf-ans"][value="${q.answer}"]`).checked = true;
+          } else if (q.type === 'mc') {
+            const opts = q.options || ['', '', '', ''];
+            for (let i = 0; i < 4; i++) {
+              document.getElementById(`modal-mc-opt-${i}`).value = opts[i] || '';
+            }
+            const correctVal = String(q.answer || '0');
+            const targetRadio = document.querySelector(`input[name="modal-mc-correct"][value="${correctVal}"]`);
+            if (targetRadio) targetRadio.checked = true;
+          } else {
+            document.getElementById('modal-sa-ans').value = q.answer;
+          }
+
+          if (q.image) {
+            currentImageBase64 = q.image;
+            document.getElementById('image-preview').src = q.image;
+            document.getElementById('image-preview-container').classList.remove('hidden');
+          }
+        }
+      } else {
+        document.getElementById('modal-q-type').value = 'tf';
+        document.getElementById('modal-q-title').value = '';
+        document.getElementById('modal-sa-ans').value = '';
+        for (let i = 0; i < 4; i++) {
+          document.getElementById(`modal-mc-opt-${i}`).value = '';
+        }
+        document.querySelector('input[name="modal-tf-ans"][value="true"]').checked = true;
+        document.querySelector('input[name="modal-mc-correct"][value="0"]').checked = true;
+      }
+
+      toggleTypeFields();
+      document.getElementById('question-modal').classList.remove('hidden');
+    }
+
+    function closeQuestionModal() {
+      document.getElementById('question-modal').classList.add('hidden');
+    }
+
+    function toggleTypeFields() {
+      const type = document.getElementById('modal-q-type').value;
+      document.getElementById('tf-answer-box').classList.add('hidden');
+      document.getElementById('mc-answer-box').classList.add('hidden');
+      document.getElementById('sa-answer-box').classList.add('hidden');
+
+      if (type === 'tf') {
+        document.getElementById('tf-answer-box').classList.remove('hidden');
+      } else if (type === 'mc') {
+        document.getElementById('mc-answer-box').classList.remove('hidden');
+      } else {
+        document.getElementById('sa-answer-box').classList.remove('hidden');
+      }
+    }
+
+    function handleImagePreview(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        currentImageBase64 = event.target.result;
+        document.getElementById('image-preview').src = currentImageBase64;
+        document.getElementById('image-preview-container').classList.remove('hidden');
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function removePreviewImage() {
+      currentImageBase64 = null;
+      document.getElementById('modal-q-image-input').value = '';
+      document.getElementById('image-preview').src = '';
+      document.getElementById('image-preview-container').classList.add('hidden');
+    }
+
+    function saveQuestion(e) {
+      e.preventDefault();
+      const editId = document.getElementById('edit-question-id').value;
+      const type = document.getElementById('modal-q-type').value;
+      const title = document.getElementById('modal-q-title').value.trim();
+
+      if (!title) return;
+
+      let answer = '';
+      let options = null;
+
+      if (type === 'tf') {
+        answer = document.querySelector('input[name="modal-tf-ans"]:checked').value;
+      } else if (type === 'mc') {
+        options = [
+          document.getElementById('modal-mc-opt-0').value.trim() || '選項A',
+          document.getElementById('modal-mc-opt-1').value.trim() || '選項B',
+          document.getElementById('modal-mc-opt-2').value.trim() || '選項C',
+          document.getElementById('modal-mc-opt-3').value.trim() || '選項D'
+        ];
+        answer = document.querySelector('input[name="modal-mc-correct"]:checked').value;
+      } else {
+        answer = document.getElementById('modal-sa-ans').value.trim();
+      }
+
+      const optionsJSON = options ? JSON.stringify(options) : null;
+
+      if (editId) {
+        // SQL UPDATE
+        db.run("UPDATE questions SET type = ?, title = ?, image = ?, options = ?, answer = ? WHERE id = ?", 
+          [type, title, currentImageBase64, optionsJSON, answer, editId]);
+      } else {
+        // SQL INSERT
+        const newId = 'q_' + Date.now();
+        db.run("INSERT INTO questions VALUES (?, ?, ?, ?, ?, ?)", 
+          [newId, type, title, currentImageBase64, optionsJSON, answer]);
+      }
+
+      saveSQLiteToStorage();
+      loadQuestionsFromSQLite();
+      renderQuestionsTable();
+      closeQuestionModal();
+      showNotification('成功', '試題已順利儲存至 SQLite 資料庫！', 'success');
+    }
+
+    function editQuestion(id) {
+      openQuestionModal(id);
+    }
+
+    function openDeleteModal(id) {
+      questionToDeleteId = id;
+      document.getElementById('delete-modal').classList.remove('hidden');
+    }
+
+    function closeDeleteModal() {
+      questionToDeleteId = null;
+      document.getElementById('delete-modal').classList.add('hidden');
+    }
+
+    function confirmDeleteQuestion() {
+      if (questionToDeleteId) {
+        // SQL DELETE
+        db.run("DELETE FROM questions WHERE id = ?", [questionToDeleteId]);
+        saveSQLiteToStorage();
+        loadQuestionsFromSQLite();
+        renderQuestionsTable();
+        closeDeleteModal();
+        showNotification('已刪除', '該筆題目已被自 SQLite 中刪除', 'success');
+      }
+    }
+
+    // --- AI AUTO GENERATION LOGIC ---
+    // --- AI AUTO GENERATION LOGIC ---
+    async function generateQuestionsWithAI() {
+      const pdfFiles = document.getElementById('pdf-file-input').files;
+      let textContent = document.getElementById('ai-text-input').value.trim();
+      const tfCount = parseInt(document.getElementById('ai-tf-count').value) || 0;
+      const mcCount = parseInt(document.getElementById('ai-mc-count').value) || 0;
+      const saCount = parseInt(document.getElementById('ai-sa-count').value) || 0;
+
+      const genBtn = document.getElementById('ai-gen-btn');
+
+      if (pdfFiles.length === 0 && !textContent) {
+        showNotification('提示', '請先選擇 PDF 檔案（可多選）或輸入文本內容以供 AI 分析！', 'info');
+        return;
+      }
+
+      if (tfCount + mcCount + saCount === 0) {
+        showNotification('提示', '請至少將一種題型的生成數量設定為 1 以上！', 'info');
+        return;
+      }
+
+      // 1. 檢查 SessionStorage 是否有 API Key，若無則要求輸入並暫存
+      let apiKey = sessionStorage.getItem('gemini_api_key');
+      if (!apiKey) {
+        const inputKey = prompt("請輸入您的 Google AI Studio API Key (格式為 AIzaSy...):");
+        if (!inputKey || !inputKey.trim()) {
+          showNotification('提示', '必須輸入有效的 API Key 才能執行 AI 自動出題！', 'info');
+          return;
+        }
+        apiKey = inputKey.trim();
+        sessionStorage.setItem('gemini_api_key', apiKey);
+      }
+
+      genBtn.disabled = true;
+      genBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>AI 多檔分析出題中，請稍候...</span>`;
+
+      try {
+        if (pdfFiles.length > 0) {
+          const pdfTexts = await extractTextFromMultiplePDFs(pdfFiles);
+          textContent = pdfTexts + '\n' + textContent;
+        }
+
+        if (!textContent.trim()) {
+          throw new Error('未能從所選檔案或輸入框讀取到有效文字內容。');
+        }
+
+        const promptText = `
+你是一位專業的測驗出題專家。請根據以下參考資料，自動產生測驗題目。
+
+【資料內容】：
+${textContent}
+
+【出題要求】：
+1. 產生 ${tfCount} 題是非題 (type 設為 "tf")，正確答案 answer 為 "true" 或 "false"。
+2. 產生 ${mcCount} 題選擇題 (type 設為 "mc")，包含 4 個選項 options (長度為 4 的字串陣列)，且答案 answer 為正確選項的索引號字串 ("0", "1", "2" 或 "3")。
+3. 產生 ${saCount} 題簡答題 (type 設為 "sa")，答題指引/解答 answer 為詳細的參考解答說明。
+4. 題目內容必須嚴謹、語意清晰，且完全基於提供的資料內容。
+
+【回應格式】：
+必須嚴格輸出為 JSON 陣列，不得包含任何 Markdown 標記，格式範例如下：
+[
+  {
+    "type": "tf",
+    "title": "題目內容...",
+    "answer": "true"
+  },
+  {
+    "type": "mc",
+    "title": "題目內容...",
+    "options": ["選項A", "選項B", "選項C", "選項D"],
+    "answer": "0"
+  },
+  {
+    "type": "sa",
+    "title": "題目內容...",
+    "answer": "參考答案說明..."
+  }
+]
+`;
+
+        // 2. 呼叫 Gemini API（帶入動態取得的 Key）
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: promptText }] }],
+            generationConfig: {
+              responseMimeType: "application/json"
+            }
+          })
+        });
+
+        if (!response.ok) {
+          // 若傳回 400/403 等 Key 錯誤，清除暫存以便下次重新輸入
+          if (response.status === 400 || response.status === 403) {
+            sessionStorage.removeItem('gemini_api_key');
+          }
+          throw new Error(`Gemini API 請求失敗 (HTTP ${response.status})，請確認 Key 是否正確或網路代理設定。`);
+        }
+
+        const data = await response.json();
+        const jsonText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        
+        if (!jsonText) {
+          throw new Error('AI 未能傳回有效答案');
+        }
+
+        const generatedQs = JSON.parse(jsonText);
+        aiGeneratedCache = generatedQs;
+        renderAIGeneratedResults(generatedQs);
+
+      } catch (err) {
+        console.error(err);
+        showNotification('出題失敗', err.message || '自動出題過程發生錯誤', 'error');
+      } finally {
+        genBtn.disabled = false;
+        genBtn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i><span>開始 AI 分析並產生題目</span>`;
+      }
+    }
+
+    async function extractTextFromMultiplePDFs(fileList) {
+      let combinedText = '';
+      for (let f = 0; f < fileList.length; f++) {
+        const file = fileList[f];
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        
+        combinedText += `\n--- [檔案 ${f + 1}: ${file.name}] ---\n`;
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map(item => item.str).join(' ');
+          combinedText += pageText + '\n';
+        }
+      }
+      return combinedText;
+    }
+
+    function renderAIGeneratedResults(items) {
+      const container = document.getElementById('ai-results-container');
+      container.innerHTML = '';
+      
+      if (items.length === 0) {
+        container.innerHTML = `
+          <div class="h-full flex flex-col items-center justify-center text-slate-400 text-center py-12">
+            <i class="fa-solid fa-file-circle-question text-4xl mb-2"></i>
+            <p class="text-sm">未找到題目</p>
+          </div>
+        `;
+        document.getElementById('ai-batch-bar').classList.add('hidden');
+        document.getElementById('ai-status-badge').classList.add('hidden');
+        return;
+      }
+
+      document.getElementById('ai-status-badge').classList.remove('hidden');
+      document.getElementById('ai-batch-bar').classList.remove('hidden');
+      document.getElementById('ai-select-all').checked = false;
+
+      const optionLabels = ['A', 'B', 'C', 'D'];
+
+      items.forEach((item, idx) => {
+        const card = document.createElement('div');
+        card.className = 'bg-white p-4 rounded-lg border border-purple-200 shadow-sm space-y-3 relative';
+        
+        let typeLabel = '';
+        if (item.type === 'tf') {
+          typeLabel = '<span class="bg-indigo-100 text-indigo-700 text-xs px-2 py-0.5 rounded font-bold">是非題</span>';
+        } else if (item.type === 'mc') {
+          typeLabel = '<span class="bg-emerald-100 text-emerald-700 text-xs px-2 py-0.5 rounded font-bold">選擇題</span>';
+        } else {
+          typeLabel = '<span class="bg-purple-100 text-purple-700 text-xs px-2 py-0.5 rounded font-bold">簡答題</span>';
+        }
+
+        let optionsHTML = '';
+        if (item.type === 'mc') {
+          const opts = item.options || [];
+          optionsHTML = `<div class="grid grid-cols-2 gap-2 mt-2">`;
+          opts.forEach((opt, oIdx) => {
+            optionsHTML += `
+              <div class="flex items-center space-x-1">
+                <span class="text-xs font-bold text-slate-500">${optionLabels[oIdx]}.</span>
+                <input type="text" id="ai-opt-${idx}-${oIdx}" value="${escapeHtml(opt)}" class="w-full p-1 border rounded text-xs">
+              </div>
+            `;
+          });
+          optionsHTML += `</div>`;
+        }
+
+        card.innerHTML = `
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <input type="checkbox" class="ai-item-checkbox rounded text-purple-600 focus:ring-purple-500 w-4 h-4" data-idx="${idx}">
+              <div>${typeLabel}</div>
+            </div>
+            <button onclick="adoptSingleAIQuestion(${idx})" id="adopt-btn-${idx}" class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3 py-1.5 rounded transition flex items-center space-x-1">
+              <i class="fa-solid fa-plus"></i><span>單題採用</span>
+            </button>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">題目內容 (可直接線上修正)</label>
+            <textarea id="ai-title-${idx}" rows="2" class="w-full p-2 border rounded text-xs bg-slate-50 font-medium">${escapeHtml(item.title)}</textarea>
+          </div>
+          ${optionsHTML}
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">正確解答 / 參考指標</label>
+            ${item.type === 'tf' ? `
+              <select id="ai-ans-${idx}" class="p-1 border rounded text-xs bg-slate-50">
+                <option value="true" ${String(item.answer).trim() === 'true' ? 'selected' : ''}>正確 (O)</option>
+                <option value="false" ${String(item.answer).trim() === 'false' ? 'selected' : ''}>錯誤 (X)</option>
+              </select>
+            ` : (item.type === 'mc' ? `
+              <select id="ai-ans-${idx}" class="p-1 border rounded text-xs bg-slate-50">
+                <option value="0" ${String(item.answer).trim() === '0' ? 'selected' : ''}>選項 A</option>
+                <option value="1" ${String(item.answer).trim() === '1' ? 'selected' : ''}>選項 B</option>
+                <option value="2" ${String(item.answer).trim() === '2' ? 'selected' : ''}>選項 C</option>
+                <option value="3" ${String(item.answer).trim() === '3' ? 'selected' : ''}>選項 D</option>
+              </select>
+            ` : `
+              <textarea id="ai-ans-${idx}" rows="2" class="w-full p-2 border rounded text-xs bg-slate-50">${escapeHtml(item.answer)}</textarea>
+            `)}
+          </div>
+        `;
+
+        card.dataset.type = item.type;
+        container.appendChild(card);
+      });
+    }
+
+    function toggleSelectAllAI(isChecked) {
+      const checkboxes = document.querySelectorAll('.ai-item-checkbox');
+      checkboxes.forEach(cb => {
+        if (!cb.disabled) cb.checked = isChecked;
+      });
+    }
+
+    function adoptSingleAIQuestion(idx) {
+      const success = processAdoptQuestion(idx);
+      if (success) {
+        showNotification('成功', '該題目已編入正式 SQLite 題庫！', 'success');
+      }
+    }
+
+    function adoptBatchAIQuestions() {
+      const selectedCBs = document.querySelectorAll('.ai-item-checkbox:checked');
+      if (selectedCBs.length === 0) {
+        showNotification('提示', '請先勾選您想採用的題目！', 'info');
+        return;
+      }
+
+      let count = 0;
+      selectedCBs.forEach(cb => {
+        const idx = parseInt(cb.dataset.idx);
+        if (processAdoptQuestion(idx)) {
+          count++;
+        }
+      });
+
+      if (count > 0) {
+        showNotification('批次匯入成功', `成功將 ${count} 筆題目加入正式 SQLite 題庫！`, 'success');
+      }
+    }
+
+    // Insert AI Question to SQLite
+    function processAdoptQuestion(idx) {
+      const btn = document.getElementById(`adopt-btn-${idx}`);
+      if (!btn || btn.disabled) return false;
+
+      const cachedItem = aiGeneratedCache[idx];
+      if (!cachedItem) return false;
+
+      const type = cachedItem.type;
+      const title = document.getElementById(`ai-title-${idx}`).value.trim();
+      const ansEl = document.getElementById(`ai-ans-${idx}`);
+      const answer = ansEl.value.trim();
+
+      if (!title) {
+        showNotification('警告', '題目內容不得為空！', 'info');
+        return false;
+      }
+
+      let options = null;
+      if (type === 'mc') {
+        options = [
+          document.getElementById(`ai-opt-${idx}-0`)?.value.trim() || '選項A',
+          document.getElementById(`ai-opt-${idx}-1`)?.value.trim() || '選項B',
+          document.getElementById(`ai-opt-${idx}-2`)?.value.trim() || '選項C',
+          document.getElementById(`ai-opt-${idx}-3`)?.value.trim() || '選項D'
+        ];
+      }
+
+      const newId = 'q_ai_' + Date.now() + '_' + idx;
+      const optionsJSON = options ? JSON.stringify(options) : null;
+
+      // SQL INSERT
+      db.run("INSERT INTO questions VALUES (?, ?, ?, ?, ?, ?)", 
+        [newId, type, title, null, optionsJSON, answer]);
+
+      saveSQLiteToStorage();
+      loadQuestionsFromSQLite();
+      renderQuestionsTable();
+
+      btn.disabled = true;
+      btn.className = 'text-xs bg-slate-300 text-slate-600 font-semibold px-3 py-1.5 rounded cursor-not-allowed flex items-center space-x-1';
+      btn.innerHTML = `<i class="fa-solid fa-check"></i><span>已採用</span>`;
+
+      const cb = document.querySelector(`.ai-item-checkbox[data-idx="${idx}"]`);
+      if (cb) {
+        cb.checked = false;
+        cb.disabled = true;
+      }
+
+      return true;
+    }
+
+    // --- UI NOTIFICATION HELPER ---
+    function showNotification(title, msg, type = 'info') {
+      const modal = document.getElementById('notification-modal');
+      const iconContainer = document.getElementById('notification-icon');
+      
+      document.getElementById('notification-title').textContent = title;
+      document.getElementById('notification-message').textContent = msg;
+
+      if (type === 'success') {
+        iconContainer.className = 'w-12 h-12 rounded-full flex items-center justify-center mx-auto text-2xl bg-emerald-100 text-emerald-600';
+        iconContainer.innerHTML = '<i class="fa-solid fa-circle-check"></i>';
+      } else if (type === 'error') {
+        iconContainer.className = 'w-12 h-12 rounded-full flex items-center justify-center mx-auto text-2xl bg-red-100 text-red-600';
+        iconContainer.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>';
+      } else {
+        iconContainer.className = 'w-12 h-12 rounded-full flex items-center justify-center mx-auto text-2xl bg-indigo-100 text-indigo-600';
+        iconContainer.innerHTML = '<i class="fa-solid fa-circle-info"></i>';
+      }
+
+      modal.classList.remove('hidden');
+    }
+
+    function closeNotification() {
+      document.getElementById('notification-modal').classList.add('hidden');
+    }
+
+    function openImageLightbox(src) {
+      if (!src) return;
+      const modal = document.getElementById('image-lightbox-modal');
+      const img = document.getElementById('lightbox-image');
+      img.src = src;
+      modal.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeImageLightbox() {
+      const modal = document.getElementById('image-lightbox-modal');
+      modal.classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+    }
+  </script>
+</body>
+</html>
